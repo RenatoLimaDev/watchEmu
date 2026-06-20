@@ -100,25 +100,25 @@
   function drawDebugGrid(){
     const { dx, dy, dw, dh } = gameRect();
     clipGame(dx, dy, dw, dh);
-    dctx.fillStyle = "#1a2a5a";
+    dctx.fillStyle = "#8bac0f";
     dctx.fillRect(dx, dy, dw, dh);
-    dctx.strokeStyle = "rgba(255,255,255,.12)";
+    dctx.strokeStyle = "rgba(48,72,0,.12)";
     dctx.lineWidth = 1;
-    const step = dw / 16;
-    for (let i = 0; i <= 16; i++){
+    const step = dw / 20;
+    for (let i = 0; i <= 20; i++){
       const x = dx + i * step;
       dctx.beginPath(); dctx.moveTo(x, dy); dctx.lineTo(x, dy + dh); dctx.stroke();
     }
-    const stepY = dh / 15;
-    for (let i = 0; i <= 15; i++){
+    const stepY = dh / 18;
+    for (let i = 0; i <= 18; i++){
       const y = dy + i * stepY;
       dctx.beginPath(); dctx.moveTo(dx, y); dctx.lineTo(dx + dw, y); dctx.stroke();
     }
     dctx.restore();
-    dctx.fillStyle = "rgba(255,255,255,.25)";
-    dctx.font = "12px monospace";
+    dctx.fillStyle = "#306230";
+    dctx.font = "bold 14px monospace";
     dctx.textAlign = "center";
-    dctx.fillText("256×240 preview", diameter / 2, dy + dh / 2);
+    dctx.fillText("WatchEmu", diameter / 2, dy + dh / 2);
   }
   function draw(){
     dctx.clearRect(0, 0, diameter, diameter);
@@ -331,7 +331,7 @@
     const ver = document.getElementById("verdict");
     ver.className = "verdict bad"; ver.textContent = msg;
     document.getElementById("romInfo").hidden = false;
-    romLoaded = false; running = false; hint.classList.remove("gone");
+    romLoaded = false; running = false; hint.classList.add("show");
     hint.innerHTML = "ROM nao carregou.<br>Veja o diagnostico abaixo";
   }
   function loadNESBytes(bytes, name){
@@ -342,11 +342,11 @@
         s += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
       nes.loadROM(s);
       romLoaded = true; running = true;
-      hint.classList.add("gone");
+      hint.classList.remove("show");
       initAudio(); resumeAudio();
     } catch (err) {
       romLoaded = false; running = false;
-      hint.classList.remove("gone");
+      hint.classList.add("show");
       hint.innerHTML = "ROM nao carregou.<br>Veja o diagnostico abaixo";
       const ver = document.getElementById("verdict");
       ver.className = "verdict bad";
