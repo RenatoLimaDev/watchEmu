@@ -1,0 +1,52 @@
+:root{
+  --bg:#0e0f12; --grid:#16181d; --surface:#16181d; --surface-2:#1d2026;
+  --line:#2a2e36; --ink:#c9ced8; --muted:#6b7280; --faint:#444a54;
+  --signal:#ffb020; --signal-dim:#7a5512;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{
+  background:
+    radial-gradient(1200px 600px at 50% -10%, #1a1d24 0%, transparent 60%),
+    repeating-linear-gradient(0deg, transparent 0 39px, var(--grid) 39px 40px),
+    repeating-linear-gradient(90deg, transparent 0 39px, var(--grid) 39px 40px),
+    var(--bg);
+  color:var(--ink); font-family:var(--sans);
+  min-height:100vh; padding:60px 16px;
+  display:flex; flex-direction:column; align-items:center; gap:40px;
+  -webkit-tap-highlight-color:transparent;
+}
+header{max-width:560px; text-align:center}
+.eyebrow{
+  font-family:var(--mono); font-size:11px; letter-spacing:.32em; text-transform:uppercase;
+  color:var(--signal); margin:0 0 10px;
+}
+h1{font-size:28px; line-height:1.15; margin:0 0 10px; font-weight:650; letter-spacing:-.01em}
+header p{margin:0; color:var(--muted); font-size:14px; line-height:1.6}
+.cards{display:flex; gap:20px; flex-wrap:wrap; justify-content:center; max-width:600px}
+.card{
+  flex:1; min-width:240px; max-width:280px;
+  background:var(--surface); border:1px solid var(--line); border-radius:14px;
+  padding:28px 24px; text-decoration:none; color:var(--ink);
+  transition:border-color .15s, transform .1s, box-shadow .15s;
+  display:flex; flex-direction:column; gap:12px;
+}
+.card:hover{
+  border-color:var(--signal-dim); transform:translateY(-3px);
+  box-shadow:0 12px 32px -12px rgba(0,0,0,.6);
+}
+.card h2{margin:0; font-size:20px; font-weight:650}
+.card .console{
+  font-family:var(--mono); font-size:42px; font-weight:700;
+  color:var(--signal); line-height:1;
+}
+.card p{margin:0; color:var(--muted); font-size:13px; line-height:1.5; font-family:var(--mono)}
+.card .status{
+  font-family:var(--mono); font-size:10px; letter-spacing:.14em; text-transform:uppercase;
+  padding:4px 10px; border-radius:20px; align-self:flex-start;
+}
+.card .status.ready{color:#5ad17a; border:1px solid #2f5a3a}
+.card .status.wip{color:#e8d29a; border:1px solid #6b5a2a}
+.footer{font-family:var(--mono); font-size:11px; color:var(--faint); text-align:center; line-height:1.7}
