@@ -1,7 +1,7 @@
 # WatchEmu
 
-**NES & SNES emulator designed for smartwatches**
-**Emulador NES & SNES projetado para smartwatches**
+**NES emulator designed for smartwatches**
+**Emulador NES projetado para smartwatches**
 
 ---
 
@@ -9,12 +9,11 @@
 
 ### About
 
-WatchEmu is a web-based NES and SNES emulator with a UI designed specifically for round smartwatches (Wear OS). The interface simulates a real watch form factor, placing game controls in the crescent-shaped areas between the rectangular game screen and the circular watch border.
+WatchEmu is a web-based NES emulator with a UI designed specifically for round smartwatches (Wear OS). The interface simulates a real watch form factor, placing game controls in the crescent-shaped areas between the rectangular game screen and the circular watch border.
 
 ### Features
 
 - **NES Emulation** — Pure JavaScript emulation via jsnes, no plugins required
-- **SNES Emulation** — Powered by EmulatorJS with automatic WASM core download
 - **Watch-optimized controls** — A/B buttons in top crescent (index finger), analog stick in bottom crescent (thumb), SELECT/START on side crescents
 - **Draggable analog stick** — Full 8-direction input with dead zone and diagonal support
 - **Game Boy-style idle screen** — Classic green screen when no ROM is loaded
@@ -51,28 +50,21 @@ WatchEmu is a web-based NES and SNES emulator with a UI designed specifically fo
    # VS Code Live Server extension
    ```
 2. Open `http://localhost:8080` in your browser
-3. Select NES or SNES
-4. Load a ROM file (.nes, .smc, or .zip)
-
-> **Note:** The project must be served via HTTP, not opened directly as `file://`, because the SNES emulator fetches its WASM core from a CDN.
+3. Load a ROM file (.nes or .zip)
 
 ### Project Structure
 
 ```
 watchEmu/
-  index.html              — NES/SNES selector
+  index.html              — Entry page
   shared/
     watch-ui.css           — Shared CSS (watch visual, controls, Switch Lite theme)
     home.css               — Home page styles
     fflate.min.js          — ZIP decompression library
   nes/
-    index.html             — NES standalone page
+    index.html             — NES emulator page
     jsnes.min.js           — NES emulation core
     nes-app.js             — NES app logic (rendering, input, audio, ROM loading)
-  snes/
-    index.html             — SNES standalone page
-    snes-app.js            — SNES app logic + EmulatorJS integration
-    snes.css               — SNES-specific styles
 ```
 
 ---
@@ -81,12 +73,11 @@ watchEmu/
 
 ### Sobre
 
-WatchEmu e um emulador NES e SNES baseado em web com interface projetada especificamente para smartwatches redondos (Wear OS). A interface simula o formato real de um relogio, posicionando os controles nas areas em forma de crescente entre a tela retangular do jogo e a borda circular do relogio.
+WatchEmu e um emulador NES baseado em web com interface projetada especificamente para smartwatches redondos (Wear OS). A interface simula o formato real de um relogio, posicionando os controles nas areas em forma de crescente entre a tela retangular do jogo e a borda circular do relogio.
 
 ### Funcionalidades
 
 - **Emulacao NES** — Emulacao em JavaScript puro via jsnes, sem plugins
-- **Emulacao SNES** — Atraves do EmulatorJS com download automatico do core WASM
 - **Controles otimizados para relogio** — Botoes A/B no crescente superior (dedo indicador), analogico no crescente inferior (polegar), SELECT/START nos crescentes laterais
 - **Analogico arrastavel** — Entrada em 8 direcoes com zona morta e suporte a diagonais
 - **Tela idle estilo Game Boy** — Tela verde classica quando nenhuma ROM esta carregada
@@ -123,21 +114,15 @@ WatchEmu e um emulador NES e SNES baseado em web com interface projetada especif
    # Extensao Live Server do VS Code
    ```
 2. Abra `http://localhost:8080` no navegador
-3. Selecione NES ou SNES
-4. Carregue um arquivo ROM (.nes, .smc ou .zip)
-
-> **Nota:** O projeto deve ser servido via HTTP, nao aberto diretamente como `file://`, pois o emulador SNES busca seu core WASM de um CDN.
+3. Carregue um arquivo ROM (.nes ou .zip)
 
 ---
 
 ## Credits / Creditos
 
-### Emulation Cores / Cores de Emulacao
+### Emulation Core / Core de Emulacao
 
 - **[jsnes](https://github.com/bfirsh/jsnes)** by Ben Firshman — NES emulator in JavaScript. MIT License.
-- **[EmulatorJS](https://emulatorjs.org/)** ([GitHub](https://github.com/EmulatorJS/EmulatorJS)) — Browser-based emulation platform using RetroArch cores compiled to WebAssembly. GPLv3 License.
-- **[RetroArch](https://www.retroarch.com/)** / [Libretro](https://www.libretro.com/) — Multi-platform emulation framework. The SNES core (Snes9x) is loaded via EmulatorJS. GPLv3 License.
-- **[Snes9x](https://github.com/snes9xgit/snes9x)** — SNES emulator used as the RetroArch core for SNES emulation. Non-commercial license.
 
 ### Libraries / Bibliotecas
 
@@ -148,7 +133,6 @@ WatchEmu e um emulador NES e SNES baseado em web com interface projetada especif
 - **HTML5 Canvas** — Game rendering with rounded clipping and pixel-perfect scaling
 - **Web Audio API** — NES audio output via ScriptProcessor
 - **Pointer Events API** — Touch input handling for analog stick and buttons
-- **WebAssembly** — SNES emulation core execution (via EmulatorJS CDN)
 
 ### Design Inspiration / Inspiracao de Design
 
@@ -160,9 +144,11 @@ WatchEmu e um emulador NES e SNES baseado em web com interface projetada especif
 
 ## License / Licenca
 
-This project is provided for educational and personal use. No ROMs are included. You must provide your own legally obtained ROM files.
+MIT License — See [jsnes](https://github.com/bfirsh/jsnes) and [fflate](https://github.com/101arrowz/fflate) for their respective licenses.
 
-Este projeto e fornecido para uso educacional e pessoal. Nenhuma ROM esta incluida. Voce deve fornecer seus proprios arquivos ROM obtidos legalmente.
+No ROMs are included. You must provide your own legally obtained ROM files.
+
+Nenhuma ROM esta incluida. Voce deve fornecer seus proprios arquivos ROM obtidos legalmente.
 
 ---
 
