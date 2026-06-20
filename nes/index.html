@@ -4,13 +4,21 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>WatchEmu — NES</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="../shared/watch-ui.css">
 </head>
 <body>
+  <div class="lang-switch" id="langSwitch">
+    <button class="lang-flag active" data-lang="pt" title="Portugues">PT</button>
+    <button class="lang-flag" data-lang="en" title="English">EN</button>
+  </div>
   <header>
     <p class="eyebrow">WatchEmu · NES</p>
-    <h1>Emulador NES para Smartwatch</h1>
-    <p>Testa o esquema de controle (3 botoes fisicos + dedao na tela) e a legibilidade do jogo no tamanho real de um relogio redondo. Traga sua propria ROM <code>.nes</code>.</p>
+    <h1 data-pt="Emulador NES para Smartwatch" data-en="NES Emulator for Smartwatch">Emulador NES para Smartwatch</h1>
+    <p data-pt='Emulador NES com controles na tela otimizados para relogio redondo. Traga sua propria ROM <code>.nes</code>.'
+       data-en='NES emulator with on-screen controls optimized for round watches. Bring your own <code>.nes</code> ROM.'>Emulador NES com controles na tela otimizados para relogio redondo. Traga sua propria ROM <code>.nes</code>.</p>
   </header>
 
   <div class="stage">
@@ -34,55 +42,38 @@
     </div>
   </div>
 
+  <input type="file" id="file" accept=".nes,.zip,application/zip" hidden>
+  <div id="romInfo" hidden></div>
+  <span id="fps" hidden></span>
+
   <div class="panel">
-    <div class="row">
-      <button class="btn" id="loadBtn">Carregar ROM (.nes / .zip)</button>
-      <input type="file" id="file" accept=".nes,.zip,application/zip" hidden>
-      <div class="seg" id="fitSeg" role="group" aria-label="Ajuste de tela">
-        <button data-fit="fill" class="active">Preencher</button>
-        <button data-fit="fit">Inteira</button>
-      </div>
-      <div class="seg" id="zoomSeg" role="group" aria-label="Zoom da camera">
-        <button data-zoom="1" class="active">1x</button>
-        <button data-zoom="1.5">1.5x</button>
-        <button data-zoom="2">2x</button>
-      </div>
-      <button class="seg" id="soundBtn" style="padding:0"><button class="active" tabindex="-1">Som: ligado</button></button>
-      <span class="stat">FPS <b id="fps">&mdash;</b></span>
-    </div>
-
-    <div class="row">
-      <div class="field" style="flex:1; min-width:200px">
-        <label for="model">Modelo de tela</label>
-        <select id="model">
-          <option value="fossil">Fossil Gen 5 - 454x454 (redondo)</option>
-          <option value="tic">TicWatch / Pixel - 416x416 (redondo)</option>
-          <option value="gw">Galaxy Watch - 396x396 (redondo)</option>
-        </select>
-      </div>
-    </div>
-
-    <div class="diag" id="romInfo" hidden>
-      <h2>Diagnostico da ROM</h2>
-      <div id="diagRows"></div>
-      <div class="verdict" id="verdict"></div>
-    </div>
-
     <div class="legend">
-      <h2>Mapa de controle</h2>
-      <div class="map"><span class="k">D-pad</span><span class="what"><b>Mover</b> direcional na tela</span><span class="tag">toque</span></div>
-      <div class="map"><span class="k">A</span><span class="what"><b>A</b> pular</span><span class="tag">toque</span></div>
-      <div class="map"><span class="k">B</span><span class="what"><b>B</b> acao — correr / atirar</span><span class="tag">toque</span></div>
-      <div class="map"><span class="k">SEL / ST</span><span class="what"><b>Select / Start</b></span><span class="tag">toque</span></div>
-    </div>
-
-    <div class="note">
-      Todos os controles sao na tela dentro do relogio. <b>D-pad</b> para direcional, <b>A</b> para pular, <b>B</b> para acao. Nenhuma ROM acompanha esta pagina.
+      <h2 data-pt="Mapa de controle" data-en="Control map">Mapa de controle</h2>
+      <div class="map"><span class="k">D-pad</span><span class="what" data-pt="<b>Mover</b> direcional na tela" data-en="<b>Move</b> on-screen d-pad"><b>Mover</b> direcional na tela</span><span class="tag" data-pt="toque" data-en="touch">toque</span></div>
+      <div class="map"><span class="k">A</span><span class="what" data-pt="<b>A</b> pular" data-en="<b>A</b> jump"><b>A</b> pular</span><span class="tag" data-pt="toque" data-en="touch">toque</span></div>
+      <div class="map"><span class="k">B</span><span class="what" data-pt="<b>B</b> acao — correr / atirar" data-en="<b>B</b> action — run / shoot"><b>B</b> acao — correr / atirar</span><span class="tag" data-pt="toque" data-en="touch">toque</span></div>
+      <div class="map"><span class="k">SEL / ST</span><span class="what" data-pt="<b>Select / Start</b>" data-en="<b>Select / Start</b>"><b>Select / Start</b></span><span class="tag" data-pt="toque" data-en="touch">toque</span></div>
     </div>
   </div>
 
   <script src="../shared/fflate.min.js"></script>
   <script src="jsnes.min.js"></script>
   <script src="nes-app.js"></script>
+  <script>
+  (function(){
+    var lang = "pt";
+    document.getElementById("langSwitch").addEventListener("click", function(e){
+      var btn = e.target.closest("[data-lang]");
+      if (!btn || btn.dataset.lang === lang) return;
+      lang = btn.dataset.lang;
+      document.querySelectorAll(".lang-flag").forEach(function(f){ f.classList.toggle("active", f.dataset.lang === lang); });
+      document.querySelectorAll("[data-"+lang+"]").forEach(function(el){
+        var val = el.getAttribute("data-"+lang);
+        if (val !== null) el.innerHTML = val;
+      });
+      document.documentElement.lang = lang === "pt" ? "pt-BR" : "en";
+    });
+  })();
+  </script>
 </body>
 </html>

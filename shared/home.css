@@ -2,7 +2,7 @@
   --bg:#0e0f12; --grid:#16181d; --surface:#16181d; --surface-2:#1d2026;
   --line:#2a2e36; --ink:#c9ced8; --muted:#6b7280; --faint:#444a54;
   --signal:#ffb020; --signal-dim:#7a5512;
-  --mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  --mono:"Press Start 2P",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
   --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,system-ui,sans-serif;
 }
 *{box-sizing:border-box}
@@ -14,11 +14,18 @@ body{
     repeating-linear-gradient(90deg, transparent 0 39px, var(--grid) 39px 40px),
     var(--bg);
   color:var(--ink); font-family:var(--sans);
-  min-height:100vh; padding:60px 16px;
-  display:flex; flex-direction:column; align-items:center; gap:40px;
+  min-height:100vh; padding:20px 16px 12px;
+  display:flex; flex-direction:column; align-items:center; gap:20px;
   -webkit-tap-highlight-color:transparent;
 }
-header{max-width:560px; text-align:center}
+header{max-width:560px; text-align:center; position:relative}
+.lang-switch{display:flex; gap:6px; position:fixed; top:10px; right:14px; z-index:100}
+.lang-flag{
+  font-family:var(--mono); font-size:10px; background:none; border:2px solid transparent; border-radius:6px;
+  cursor:pointer; padding:4px 8px; color:var(--muted); transition:opacity .15s, border-color .15s, color .15s;
+}
+.lang-flag:hover{color:var(--ink)}
+.lang-flag.active{color:var(--signal); border-color:var(--signal)}
 .eyebrow{
   font-family:var(--mono); font-size:11px; letter-spacing:.32em; text-transform:uppercase;
   color:var(--signal); margin:0 0 10px;
@@ -39,7 +46,7 @@ header p{margin:0; color:var(--muted); font-size:14px; line-height:1.6}
 }
 .card h2{margin:0; font-size:20px; font-weight:650}
 .card .console{
-  font-family:var(--mono); font-size:42px; font-weight:700;
+  font-family:var(--mono); font-size:32px; font-weight:400;
   color:var(--signal); line-height:1;
 }
 .card p{margin:0; color:var(--muted); font-size:13px; line-height:1.5; font-family:var(--mono)}

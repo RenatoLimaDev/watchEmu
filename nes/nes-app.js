@@ -116,7 +116,7 @@
     }
     dctx.restore();
     dctx.fillStyle = "#306230";
-    dctx.font = "bold 14px monospace";
+    dctx.font = "10px 'Press Start 2P', monospace";
     dctx.textAlign = "center";
     dctx.fillText("WatchEmu", diameter / 2, dy + dh / 2);
   }
@@ -313,26 +313,10 @@
     }
     return { rows, verdict, cls };
   }
-  function renderDiag(d){
-    const wrap = document.getElementById("diagRows"); wrap.innerHTML = "";
-    d.rows.forEach(([k, v]) => {
-      const row = document.createElement("div"); row.className = "drow";
-      const a = document.createElement("span"); a.textContent = k;
-      const b = document.createElement("span");
-      if (Array.isArray(v)){ b.textContent = v[0]; b.className = v[1]; } else b.textContent = v;
-      row.append(a, b); wrap.append(row);
-    });
-    const ver = document.getElementById("verdict");
-    ver.textContent = d.verdict; ver.className = "verdict " + d.cls;
-    document.getElementById("romInfo").hidden = false;
-  }
+  function renderDiag(){}
   function showDiagError(msg){
-    document.getElementById("diagRows").innerHTML = "";
-    const ver = document.getElementById("verdict");
-    ver.className = "verdict bad"; ver.textContent = msg;
-    document.getElementById("romInfo").hidden = false;
     romLoaded = false; running = false; hint.classList.add("show");
-    hint.innerHTML = "ROM nao carregou.<br>Veja o diagnostico abaixo";
+    hint.innerHTML = "ROM nao carregou.<br>" + msg;
   }
   function loadNESBytes(bytes, name){
     renderDiag(inspectROM(bytes, name));
@@ -355,7 +339,6 @@
   }
 
   const fileInput = document.getElementById("file");
-  document.getElementById("loadBtn").addEventListener("click", () => fileInput.click());
   document.getElementById("romBtn").addEventListener("click", () => fileInput.click());
   fileInput.addEventListener("change", (e) => {
     const f = e.target.files[0]; if (!f) return;
@@ -387,27 +370,6 @@
     reader.readAsArrayBuffer(f);
   });
 
-  // --- panel controls ---
-  document.getElementById("model").addEventListener("change", (e) => {
-    diameter = MODELS[e.target.value] || MODELS.fossil; applySize();
-  });
-  document.getElementById("fitSeg").addEventListener("click", (e) => {
-    const b = e.target.closest("button[data-fit]"); if (!b) return;
-    fitMode = b.dataset.fit;
-    [...e.currentTarget.children].forEach(x => x.classList.toggle("active", x === b));
-  });
-  document.getElementById("zoomSeg").addEventListener("click", (e) => {
-    const b = e.target.closest("button[data-zoom]"); if (!b) return;
-    zoom = parseFloat(b.dataset.zoom);
-    [...e.currentTarget.children].forEach(x => x.classList.toggle("active", x === b));
-  });
-  const soundBtn = document.getElementById("soundBtn");
-  soundBtn.addEventListener("click", () => {
-    soundOn = !soundOn;
-    if (gain) gain.gain.value = soundOn ? 0.6 : 0;
-    soundBtn.firstElementChild.textContent = "Som: " + (soundOn ? "ligado" : "mudo");
-    resumeAudio();
-  });
 
   applySize();
   window.addEventListener("resize", applySize);
