@@ -150,7 +150,3 @@ No ROMs are included. You must provide your own legally obtained ROM files.
 
 Nenhuma ROM esta incluida. Voce deve fornecer seus proprios arquivos ROM obtidos legalmente.
 
----
-
-*Made with passion for retro gaming on tiny screens.*
-*Feito com paixao por jogos retro em telas minusculas.*
