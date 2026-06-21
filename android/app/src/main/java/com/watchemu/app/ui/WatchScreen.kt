@@ -1,29 +1,81 @@
 package com.watchemu.app.ui
 
 import android.graphics.Bitmap
+import android.graphics.RenderEffect
+import android.graphics.RuntimeShader
 import android.graphics.Typeface
+import android.os.Build
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+
+/**
+ * AGSL fisheye/barrel-distortion shader (Android 13+). The game is rendered
+ * normally into a layer; this shader is applied as a RenderEffect over that
+ * layer, so the GPU bends the edges inward — no per-pixel CPU work, emulation
+ * untouched. `strength` 0 = none; ~0.15 subtle; ~0.35 strong (CRT-ish).
+ */
+private const val FISHEYE_AGSL = """
+uniform shader content;
+uniform float2 size;
+uniform float strength;
+
+half4 main(float2 coord) {
+    float2 uv = coord / size;          // 0..1
+    float2 c = uv - 0.5;               // centered, -0.5..0.5
+    float r2 = dot(c, c) * 4.0;        // 0 at center, ~1 near edges
+    // Barrel map: pull samples outward as r grows, compressing the edges.
+    float2 warped = c * (1.0 - strength * r2);
+    float2 src = (warped + 0.5) * size;
+    return content.eval(src);
+}
+"""
+
+/** Builds the Compose RenderEffect that applies the fisheye shader to a layer.
+ *  Requires API 33+ (RuntimeShader). */
+@androidx.annotation.RequiresApi(Build.VERSION_CODES.TIRAMISU)
+private fun buildFisheyeEffect(w: Float, h: Float, strength: Float): androidx.compose.ui.graphics.RenderEffect {
+    val shader = RuntimeShader(FISHEYE_AGSL)
+    shader.setFloatUniform("size", w, h)
+    shader.setFloatUniform("strength", strength)
+    val effect = RenderEffect.createRuntimeShaderEffect(shader, "content")
+    return effect.asComposeRenderEffect()
+}
 
 @Composable
 fun WatchScreen(
     bitmap: Bitmap?,
     romLoaded: Boolean,
     frameCount: Int = 0,
-    bezelColor: Color = Color(0xFFD4920A),
-    bezelAccent: Color = Color(0xFF6B3A10),
-    stickOffsetX: Float = 0f,
-    stickOffsetY: Float = 0f
+    // Floating d-pad overlay (left half). Position is in screen pixels.
+    dpadActive: Boolean = false,
+    dpadCx: Float = 0f,
+    dpadCy: Float = 0f,
+    dpadKnobX: Float = 0f,
+    dpadKnobY: Float = 0f,
+    // A/B button overlay (right half).
+    buttonAActive: Boolean = false,
+    buttonBActive: Boolean = false,
+    // Start/Select overlay (top corners).
+    buttonStartActive: Boolean = false,
+    buttonSelectActive: Boolean = false,
+    // Fisheye level: 0 = off (flat, whole picture), 1 = subtle.
+    fisheyeLevel: Int = 0,
+    // When true, briefly draw all button areas (long-press reveal). Controls are
+    // invisible otherwise so the game owns the whole screen.
+    showAreas: Boolean = false
 ) {
     val context = LocalContext.current
     val pressStart2P = remember {
@@ -36,31 +88,110 @@ fun WatchScreen(
         }
     }
 
+    // Fisheye strength for the current level; 0 disables the shader.
+    val fisheyeStrength = when (fisheyeLevel) {
+        1 -> 0.15f       // subtle barrel curve
+        else -> 0f       // flat (default)
+    }
+    val shaderSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+
+    // Build the RenderEffect once per (size, strength) — applied to the game layer.
+    var layerPx by remember { mutableStateOf(Size.Zero) }
+    val gameModifier = if (shaderSupported && fisheyeStrength > 0f && layerPx.minDimension > 0f) {
+        Modifier
+            .fillMaxSize()
+            .graphicsLayer {
+                renderEffect = buildFisheyeEffect(layerPx.width, layerPx.height, fisheyeStrength)
+            }
+    } else {
+        Modifier.fillMaxSize()
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
         // Layer 1: dark face + game image. This Canvas reads `frameCount`, so it
         // is the only thing the runtime repaints every emulated frame (~60fps).
-        Canvas(modifier = Modifier.fillMaxSize()) {
+        // When fisheye is on, this layer carries the GPU RenderEffect.
+        Canvas(modifier = gameModifier) {
             // Touch frameCount so this layer invalidates each new frame.
             @Suppress("UNUSED_EXPRESSION") frameCount
             val w = size.width
             val h = size.height
+            if (layerPx.width != w || layerPx.height != h) layerPx = Size(w, h)
             val diameter = minOf(w, h)
             val ox = (w - diameter) / 2f
             val oy = (h - diameter) / 2f
-            drawGameLayer(ox, oy, diameter, bitmap, romLoaded, pressStart2P)
+            // With fisheye on, render the WHOLE picture (fit) and let the shader
+            // bend the edges to fill; off = honor the flat fit look.
+            drawGameLayer(ox, oy, diameter, bitmap, romLoaded, pressStart2P, fill = false)
         }
 
-        // Layer 2: bezel, A/B/SELECT/START buttons and analog stick. This Canvas
-        // does NOT read frameCount, so the runtime only repaints it when the
-        // bezel color or stick position actually changes — not 60x/second. The
-        // buttons/bezel are static, so this saves a huge amount of per-frame work.
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val w = size.width
-            val h = size.height
-            val diameter = minOf(w, h)
-            val ox = (w - diameter) / 2f
-            val oy = (h - diameter) / 2f
-            drawControlsLayer(ox, oy, diameter, bezelColor, bezelAccent, stickOffsetX, stickOffsetY, pressStart2P)
+        // Layer 2: the d-pad is the ONLY control shown during play — it appears
+        // under the finger so the player has a sense of direction. Action buttons
+        // stay invisible. A long-press additionally flips `showAreas` on to draw
+        // the zone boundaries (pizza slices) as a sharp, clearly visible guide.
+        // Lines match radialButtonAt(): bottom half = d-pad; top half is four
+        // 45-degree slices SELECT | START | B | A (left -> right).
+        if (dpadActive || showAreas) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val w = size.width
+                val h = size.height
+                val diameter = minOf(w, h)
+
+                if (showAreas) {
+                    val cx = w * 0.5f
+                    val cy = h * 0.5f
+                    val reach = diameter
+
+                    // Bright rays from center: middle split + three top dividers.
+                    fun ray(deg: Double) {
+                        val a = Math.toRadians(deg)
+                        drawLine(
+                            Color(0xFFFFFFFF),
+                            Offset(cx, cy),
+                            Offset(cx + (kotlin.math.cos(a) * reach).toFloat(),
+                                   cy + (kotlin.math.sin(a) * reach).toFloat()),
+                            strokeWidth = 4f
+                        )
+                    }
+                    ray(0.0); ray(180.0)
+                    ray(-135.0); ray(-90.0); ray(-45.0)
+
+                    // Crisp labels: dark outline + bright fill so they pop over the game.
+                    fun label(text: String, deg: Double, rFrac: Float) {
+                        val a = Math.toRadians(deg)
+                        val r = reach * rFrac
+                        val tx = cx + (kotlin.math.cos(a) * r).toFloat()
+                        val ty = cy + (kotlin.math.sin(a) * r).toFloat()
+                        val base = android.graphics.Paint().apply {
+                            textSize = diameter * 0.055f
+                            textAlign = android.graphics.Paint.Align.CENTER
+                            typeface = pressStart2P
+                            isAntiAlias = true
+                        }
+                        val fm = base.fontMetrics
+                        val by = ty - (fm.ascent + fm.descent) / 2f
+                        val nc = drawContext.canvas.nativeCanvas
+                        val outline = android.graphics.Paint(base).apply {
+                            style = android.graphics.Paint.Style.STROKE
+                            strokeWidth = diameter * 0.012f
+                            color = 0xFF000000.toInt()
+                        }
+                        nc.drawText(text, tx, by, outline)
+                        base.color = 0xFFFFD24A.toInt()
+                        nc.drawText(text, tx, by, base)
+                    }
+                    label("SEL", -157.5, 0.30f)
+                    label("STA", -112.5, 0.34f)
+                    label("B",    -67.5, 0.34f)
+                    label("A",    -22.5, 0.30f)
+                    label("DPAD",  90.0, 0.32f)
+                }
+
+                // The live d-pad under the finger (sense of direction while playing).
+                if (dpadActive) {
+                    drawFloatingDpad(dpadCx, dpadCy, diameter * 0.11f, dpadKnobX, dpadKnobY)
+                }
+            }
         }
     }
 }
@@ -69,31 +200,56 @@ fun WatchScreen(
 private fun DrawScope.drawGameLayer(
     ox: Float, oy: Float, diameter: Float,
     bitmap: Bitmap?, romLoaded: Boolean,
-    font: Typeface
+    font: Typeface, fill: Boolean
 ) {
     val radius = diameter / 2f
     val centerX = ox + radius
     val centerY = oy + radius
 
-    // Dark watch face background
+    // --- Console body: the area around the screen looks like the handheld's
+    // shell instead of flat black. Vertical graphite gradient (lighter at top)
+    // for volume, plus a soft top highlight like light on plastic/metal.
+    drawCircle(
+        brush = Brush.verticalGradient(
+            colors = listOf(Color(0xFF3A3D44), Color(0xFF26282E), Color(0xFF131418)),
+            startY = oy, endY = oy + diameter
+        ),
+        radius = radius,
+        center = Offset(centerX, centerY)
+    )
     drawCircle(
         brush = Brush.radialGradient(
-            colors = listOf(Color(0xFF0C0D10), Color(0xFF050506)),
-            center = Offset(centerX, centerY - diameter * 0.12f),
-            radius = radius
+            colors = listOf(Color(0x33FFFFFF), Color(0x00FFFFFF)),
+            center = Offset(centerX, oy + diameter * 0.12f),
+            radius = diameter * 0.55f
         ),
         radius = radius,
         center = Offset(centerX, centerY)
     )
 
-    // Game screen area
-    val gameW = diameter * 0.84f
+    // Game screen = a rounded-rectangle "console screen" inset into the body, so
+    // the shell shows as a frame around it. NES (256:240) ~ box (263:247), so the
+    // picture fills the rounded rect with no stretching.
+    val gameW = diameter * 0.80f
     val gameH = gameW * (240f / 256f)
     val gameX = ox + (diameter - gameW) / 2f
-    val gameY = oy + (diameter - gameH) / 2f - diameter * 0.01f
+    val gameY = oy + (diameter - gameH) / 2f
+    val cr = gameW * 0.19f                 // corner radius (~50 on a 263-wide box)
+    val roundRect = androidx.compose.ui.geometry.RoundRect(
+        gameX, gameY, gameX + gameW, gameY + gameH, CornerRadius(cr, cr)
+    )
+    val roundPath = Path().apply { addRoundRect(roundRect) }
+
+    // Recessed bezel around the screen (dark ring = screen sits inside the body).
+    drawRoundRect(
+        color = Color(0xFF0A0B0D),
+        topLeft = Offset(gameX - diameter * 0.012f, gameY - diameter * 0.012f),
+        size = Size(gameW + diameter * 0.024f, gameH + diameter * 0.024f),
+        cornerRadius = CornerRadius(cr * 1.1f, cr * 1.1f)
+    )
 
     if (bitmap != null && romLoaded) {
-        clipRect(gameX, gameY, gameX + gameW, gameY + gameH) {
+        clipPath(roundPath) {
             drawImage(
                 image = bitmap.asImageBitmap(),
                 dstOffset = androidx.compose.ui.unit.IntOffset(gameX.toInt(), gameY.toInt()),
@@ -102,7 +258,7 @@ private fun DrawScope.drawGameLayer(
             )
         }
     } else {
-        clipRect(gameX, gameY, gameX + gameW, gameY + gameH) {
+        clipPath(roundPath) {
             drawRect(Color(0xFF8BAC0F), Offset(gameX, gameY), Size(gameW, gameH))
             val gridColor = Color(0x1E304800)
             val stepX = gameW / 20f
@@ -126,231 +282,125 @@ private fun DrawScope.drawGameLayer(
     }
 }
 
-/** Bezel tray, face buttons and analog stick. Static — only repainted when the
- *  bezel color or stick position changes, never per emulated frame. */
-private fun DrawScope.drawControlsLayer(
-    ox: Float, oy: Float, diameter: Float,
-    bezelColor: Color, bezelAccent: Color,
-    stickOffsetX: Float, stickOffsetY: Float,
-    font: Typeface
+/** Floating d-pad drawn under the finger — the only control visible during play,
+ *  giving a clear sense of direction. The knob offset (-1..1) shows the push. */
+private fun DrawScope.drawFloatingDpad(
+    cx: Float, cy: Float, radius: Float, knobX: Float, knobY: Float
 ) {
-    val radius = diameter / 2f
-    val centerX = ox + radius
-    val centerY = oy + radius
-
-    // Bottom tray (golden crescent at bottom)
-    val trayTop = oy + diameter * 0.82f
-    clipRect(ox, trayTop, ox + diameter, oy + diameter) {
-        drawCircle(bezelColor, radius, Offset(centerX, centerY))
-    }
-    drawArc(
-        color = bezelAccent,
-        startAngle = 35f, sweepAngle = 110f,
-        useCenter = false,
-        topLeft = Offset(ox + 2, oy + 2),
-        size = Size(diameter - 4, diameter - 4),
-        style = Stroke(2f)
-    )
-
-    // Buttons with Press Start 2P font
-    drawCrescentButton(ox, oy, diameter, isLeft = true, label = "A", bezelColor, bezelAccent, font)
-    drawCrescentButton(ox, oy, diameter, isLeft = false, label = "B", bezelColor, bezelAccent, font)
-    drawSideButton(ox, oy, diameter, isLeft = true, label = "SELECT", bezelColor, bezelAccent, font)
-    drawSideButton(ox, oy, diameter, isLeft = false, label = "START", bezelColor, bezelAccent, font)
-
-    drawAnalogStick(centerX, oy + diameter * 0.91f, diameter * 0.09f, stickOffsetX, stickOffsetY)
-}
-
-private fun DrawScope.drawCrescentButton(
-    ox: Float, oy: Float, diameter: Float, isLeft: Boolean, label: String,
-    bezelColor: Color, bezelAccent: Color, font: Typeface
-) {
-    val btnW = diameter * 0.40f
-    val btnH = diameter * 0.125f
-    val btnX = if (isLeft) ox + diameter * 0.10f else ox + diameter * 0.50f
-    val btnY = oy
-
-    clipRect(ox, oy, ox + diameter, oy + diameter) {
-        // Button background with gradient (matching CSS linear-gradient)
-        drawRect(
-            brush = Brush.verticalGradient(
-                colors = listOf(Color(0xFFF0C040), Color(0xFFD4920A)),
-                startY = btnY, endY = btnY + btnH
-            ),
-            topLeft = Offset(btnX, btnY),
-            size = Size(btnW, btnH)
-        )
-        // Bottom border
-        drawLine(bezelAccent, Offset(btnX, btnY + btnH), Offset(btnX + btnW, btnY + btnH), 2f)
-        // Inner divider between A and B
-        if (isLeft) {
-            drawLine(bezelAccent, Offset(btnX + btnW, btnY), Offset(btnX + btnW, btnY + btnH), 1f)
-        } else {
-            drawLine(bezelAccent, Offset(btnX, btnY), Offset(btnX, btnY + btnH), 1f)
-        }
-        // Highlight at top for 3D effect
-        drawLine(
-            Color(0x4DFFFFFF),
-            Offset(btnX + 2, btnY + 1),
-            Offset(btnX + btnW - 2, btnY + 1),
-            1f
-        )
-    }
-
-    val textPaint = android.graphics.Paint().apply {
-        color = 0xFF5A3000.toInt()
-        textSize = diameter * 0.035f
-        textAlign = if (isLeft) android.graphics.Paint.Align.RIGHT else android.graphics.Paint.Align.LEFT
-        typeface = font
-        isAntiAlias = true
-    }
-    val tx = if (isLeft) btnX + btnW - diameter * 0.06f else btnX + diameter * 0.06f
-    drawContext.canvas.nativeCanvas.drawText(label, tx, btnY + btnH * 0.72f, textPaint)
-}
-
-private fun DrawScope.drawSideButton(
-    ox: Float, oy: Float, diameter: Float, isLeft: Boolean, label: String,
-    bezelColor: Color, bezelAccent: Color, font: Typeface
-) {
-    val btnW = diameter * 0.105f
-    val btnH = diameter * 0.80f
-    val btnX = if (isLeft) ox else ox + diameter - btnW
-    val btnY = oy + diameter * 0.10f
-
-    clipRect(ox, oy, ox + diameter, oy + diameter) {
-        // Button background with gradient
-        drawRect(
-            brush = if (isLeft) {
-                Brush.horizontalGradient(
-                    colors = listOf(Color(0xFFD4920A), Color(0xFFF0C040)),
-                    startX = btnX, endX = btnX + btnW
-                )
-            } else {
-                Brush.horizontalGradient(
-                    colors = listOf(Color(0xFFF0C040), Color(0xFFD4920A)),
-                    startX = btnX, endX = btnX + btnW
-                )
-            },
-            topLeft = Offset(btnX, btnY),
-            size = Size(btnW, btnH)
-        )
-        // Inner border (the edge facing the screen)
-        val borderX = if (isLeft) btnX + btnW else btnX
-        drawLine(bezelAccent, Offset(borderX, btnY), Offset(borderX, btnY + btnH), 2f)
-        // Outer border
-        val outerBorderX = if (isLeft) btnX else btnX + btnW
-        drawLine(bezelAccent, Offset(outerBorderX, btnY), Offset(outerBorderX, btnY + btnH), 2f)
-    }
-
-    val textPaint = android.graphics.Paint().apply {
-        color = 0xFF5A3000.toInt()
-        textSize = diameter * 0.032f
-        textAlign = android.graphics.Paint.Align.CENTER
-        typeface = font
-        isAntiAlias = true
-        letterSpacing = 0.05f
-        isFakeBoldText = true
-        strokeWidth = diameter * 0.002f
-        style = android.graphics.Paint.Style.FILL_AND_STROKE
-    }
-    val tx = btnX + btnW * 0.45f
-    val ty = oy + diameter / 2f
-    drawContext.canvas.nativeCanvas.save()
-    drawContext.canvas.nativeCanvas.rotate(90f, tx, ty)
-    drawContext.canvas.nativeCanvas.drawText(label, tx, ty + diameter * 0.01f, textPaint)
-    drawContext.canvas.nativeCanvas.restore()
-}
-
-private fun DrawScope.drawAnalogStick(cx: Float, cy: Float, radius: Float, offsetX: Float, offsetY: Float) {
-    // Base with shadow
+    // Dark backing ring for contrast against bright game scenes.
     drawCircle(
-        color = Color(0x33000000),
-        radius = radius + 2f,
-        center = Offset(cx, cy + 2f)
+        color = Color(0x99000000),
+        radius = radius * 1.08f,
+        center = Offset(cx, cy)
     )
-    drawCircle(
-        brush = Brush.verticalGradient(
-            colors = listOf(Color(0xFFC8C0B0), Color(0xFFA89880)),
-            startY = cy - radius, endY = cy + radius
-        ),
-        radius = radius, center = Offset(cx, cy)
-    )
-    drawCircle(
-        color = Color(0xFF6B3A10), radius = radius,
-        center = Offset(cx, cy),
-        style = Stroke(2f)
-    )
-    // Inner shadow
     drawCircle(
         brush = Brush.radialGradient(
-            colors = listOf(Color.Transparent, Color(0x33000000)),
+            colors = listOf(Color(0xCCF0C040), Color(0x66F0C040)),
             center = Offset(cx, cy),
             radius = radius
         ),
         radius = radius,
         center = Offset(cx, cy)
     )
-
-    // Stick knob — moves with finger
-    val stickR = radius * 0.6f
-    val maxMove = radius * 0.4f
-    val stickCx = cx + offsetX * maxMove
-    val stickCy = cy + offsetY * maxMove
-
-    val isActive = offsetX != 0f || offsetY != 0f
-
-    // Knob shadow
     drawCircle(
-        color = Color(0x4D000000),
-        radius = stickR + 1f,
-        center = Offset(stickCx, stickCy + 3f)
+        color = Color(0xFFD4920A),
+        radius = radius,
+        center = Offset(cx, cy),
+        style = Stroke(3f)
     )
 
+    // Direction hints (4 spokes) — bright and clear.
+    val hint = Color(0xCCFFFFFF)
+    val hr = radius * 0.78f
+    drawLine(hint, Offset(cx, cy - hr * 0.6f), Offset(cx, cy - hr), 4f)
+    drawLine(hint, Offset(cx, cy + hr * 0.6f), Offset(cx, cy + hr), 4f)
+    drawLine(hint, Offset(cx - hr * 0.6f, cy), Offset(cx - hr, cy), 4f)
+    drawLine(hint, Offset(cx + hr * 0.6f, cy), Offset(cx + hr, cy), 4f)
+
+    // Knob — moves toward the pressed direction
+    val maxMove = radius * 0.45f
+    val knobR = radius * 0.5f
+    val kx = cx + knobX * maxMove
+    val ky = cy + knobY * maxMove
+    drawCircle(color = Color(0x55000000), radius = knobR + 1f, center = Offset(kx, ky + 2f))
     drawCircle(
-        brush = if (isActive) {
-            Brush.linearGradient(
-                colors = listOf(Color(0xFFF0D870), Color(0xFFD4A820)),
-                start = Offset(stickCx - stickR, stickCy - stickR),
-                end = Offset(stickCx + stickR, stickCy + stickR)
-            )
-        } else {
-            Brush.linearGradient(
-                colors = listOf(Color(0xFFE8E0D4), Color(0xFFC8C0B0)),
-                start = Offset(stickCx - stickR, stickCy - stickR),
-                end = Offset(stickCx + stickR, stickCy + stickR)
-            )
-        },
-        radius = stickR, center = Offset(stickCx, stickCy)
-    )
-    drawCircle(
-        color = if (isActive) Color(0xFF6B3A10) else Color(0xFFA89880),
-        radius = stickR,
-        center = Offset(stickCx, stickCy),
-        style = Stroke(2f)
-    )
-    // Highlight on knob for 3D effect
-    drawCircle(
-        brush = Brush.radialGradient(
-            colors = listOf(Color(0x40FFFFFF), Color.Transparent),
-            center = Offset(stickCx - stickR * 0.3f, stickCy - stickR * 0.3f),
-            radius = stickR * 0.8f
+        brush = Brush.linearGradient(
+            colors = listOf(Color(0xFFF0D870), Color(0xFFD4A820)),
+            start = Offset(kx - knobR, ky - knobR),
+            end = Offset(kx + knobR, ky + knobR)
         ),
-        radius = stickR * 0.7f,
-        center = Offset(stickCx - stickR * 0.2f, stickCy - stickR * 0.2f)
+        radius = knobR, center = Offset(kx, ky)
     )
+    drawCircle(color = Color(0xFF6B3A10), radius = knobR, center = Offset(kx, ky), style = Stroke(2f))
+}
 
-    // Arrow hints (only show when not active)
-    if (!isActive) {
-        val arrowPaint = android.graphics.Paint().apply {
-            color = 0x40000000
-            textSize = radius * 0.5f
-            textAlign = android.graphics.Paint.Align.CENTER
-            typeface = android.graphics.Typeface.MONOSPACE
-        }
-        val nc = drawContext.canvas.nativeCanvas
-        nc.drawText("▲", cx, cy - radius * 0.25f, arrowPaint)
-        nc.drawText("▼", cx, cy + radius * 0.55f, arrowPaint)
-        nc.drawText("◀", cx - radius * 0.45f, cy + radius * 0.15f, arrowPaint)
-        nc.drawText("▶", cx + radius * 0.45f, cy + radius * 0.15f, arrowPaint)
+/** A circular action button (A/B). Faint when idle, bright when pressed. */
+private fun DrawScope.drawActionButton(
+    cx: Float, cy: Float, radius: Float, label: String, pressed: Boolean, font: Typeface
+) {
+    val fill = if (pressed) {
+        Brush.radialGradient(
+            colors = listOf(Color(0xFFF0D060), Color(0xFFD4920A)),
+            center = Offset(cx, cy), radius = radius
+        )
+    } else {
+        Brush.radialGradient(
+            colors = listOf(Color(0x33F0C040), Color(0x18D4920A)),
+            center = Offset(cx, cy), radius = radius
+        )
     }
+    drawCircle(brush = fill, radius = radius, center = Offset(cx, cy))
+    drawCircle(
+        color = if (pressed) Color(0xFF6B3A10) else Color(0x66D4920A),
+        radius = radius,
+        center = Offset(cx, cy),
+        style = Stroke(if (pressed) 3f else 2f)
+    )
+    val textPaint = android.graphics.Paint().apply {
+        color = if (pressed) 0xFF3E2800.toInt() else 0x88FFFFFF.toInt()
+        textSize = radius * 0.6f
+        textAlign = android.graphics.Paint.Align.CENTER
+        typeface = font
+        isAntiAlias = true
+    }
+    // Vertically center the glyph on the button.
+    val fm = textPaint.fontMetrics
+    val baseline = cy - (fm.ascent + fm.descent) / 2f
+    drawContext.canvas.nativeCanvas.drawText(label, cx, baseline, textPaint)
+}
+
+/** A small pill in a top corner for the rarely-used Start/Select. Very faint
+ *  when idle so it doesn't distract; lights up when pressed. */
+private fun DrawScope.drawCornerButton(
+    cx: Float, cy: Float, diameter: Float, label: String, pressed: Boolean, font: Typeface
+) {
+    val pillW = diameter * 0.26f
+    val pillH = diameter * 0.085f
+    val left = cx - pillW / 2f
+    val top = cy - pillH / 2f
+    val corner = CornerRadius(pillH / 2f, pillH / 2f)
+    drawRoundRect(
+        color = if (pressed) Color(0xCCD4920A) else Color(0x22FFFFFF),
+        topLeft = Offset(left, top),
+        size = Size(pillW, pillH),
+        cornerRadius = corner
+    )
+    drawRoundRect(
+        color = if (pressed) Color(0xFF6B3A10) else Color(0x44FFFFFF),
+        topLeft = Offset(left, top),
+        size = Size(pillW, pillH),
+        cornerRadius = corner,
+        style = Stroke(if (pressed) 2.5f else 1.5f)
+    )
+    val textPaint = android.graphics.Paint().apply {
+        color = if (pressed) 0xFF3E2800.toInt() else 0x99FFFFFF.toInt()
+        textSize = pillH * 0.32f
+        textAlign = android.graphics.Paint.Align.CENTER
+        typeface = font
+        isAntiAlias = true
+        letterSpacing = 0.03f
+    }
+    val fm = textPaint.fontMetrics
+    val baseline = cy - (fm.ascent + fm.descent) / 2f
+    drawContext.canvas.nativeCanvas.drawText(label, cx, baseline, textPaint)
 }
