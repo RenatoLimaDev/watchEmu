@@ -12,6 +12,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.BluetoothSearching
 import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -31,10 +32,15 @@ import androidx.wear.compose.foundation.lazy.ScalingLazyColumn
 import androidx.wear.compose.foundation.lazy.rememberScalingLazyListState
 import androidx.wear.compose.material.Chip
 import androidx.wear.compose.material.ChipDefaults
+import androidx.compose.foundation.clickable
+import androidx.wear.compose.foundation.ExperimentalWearFoundationApi
+import androidx.wear.compose.foundation.rememberRevealState
+import androidx.wear.compose.material.ExperimentalWearMaterialApi
 import androidx.wear.compose.material.Icon
 import androidx.wear.compose.material.MaterialTheme
 import androidx.wear.compose.material.PositionIndicator
 import androidx.wear.compose.material.Scaffold
+import androidx.wear.compose.material.SwipeToRevealChip
 import androidx.wear.compose.material.Text
 import androidx.wear.compose.material.TimeText
 import androidx.wear.compose.material.Vignette
@@ -74,12 +80,14 @@ private fun colorsForName(name: String): CartridgeColors {
     return palette[hash % palette.size]
 }
 
+@OptIn(ExperimentalWearMaterialApi::class, ExperimentalWearFoundationApi::class)
 @Composable
 fun RomPickerScreen(
     romFiles: List<File>,
     isReceiving: Boolean = false,
     onReceive: () -> Unit = {},
-    onRomSelected: (File) -> Unit
+    onRomSelected: (File) -> Unit,
+    onRomDeleted: (File) -> Unit = {}
 ) {
     val listState = rememberScalingLazyListState()
 
@@ -153,28 +161,45 @@ fun RomPickerScreen(
                 items(romFiles.size) { index ->
                     val file = romFiles[index]
                     val gameName = file.nameWithoutExtension
-                    val colors = colorsForName(file.nameWithoutExtension)
+                    val cartColors = colorsForName(file.nameWithoutExtension)
+                    val revealState = rememberRevealState()
 
-                    Chip(
-                        onClick = { onRomSelected(file) },
-                        label = {
-                            Text(
-                                text = gameName,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
+                    SwipeToRevealChip(
+                        revealState = revealState,
+                        modifier = Modifier.fillMaxWidth(),
+                        primaryAction = {
+                            Icon(
+                                imageVector = Icons.Filled.Delete,
+                                contentDescription = "Delete",
+                                tint = Color.White,
+                                modifier = Modifier
+                                    .size(24.dp)
+                                    .clickable { onRomDeleted(file) }
                             )
                         },
-                        secondaryLabel = {
-                            Text(if (file.extension.equals("zip", true)) "ZIP" else "NES")
-                        },
-                        icon = {
-                            Canvas(modifier = Modifier.size(ChipDefaults.IconSize)) {
-                                drawCartridge(size.width, size.height, colors)
-                            }
-                        },
-                        colors = ChipDefaults.secondaryChipColors(),
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                        onFullSwipe = { onRomDeleted(file) }
+                    ) {
+                        Chip(
+                            onClick = { onRomSelected(file) },
+                            label = {
+                                Text(
+                                    text = gameName,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            },
+                            secondaryLabel = {
+                                Text(if (file.extension.equals("zip", true)) "ZIP" else "NES")
+                            },
+                            icon = {
+                                Canvas(modifier = Modifier.size(ChipDefaults.IconSize)) {
+                                    drawCartridge(size.width, size.height, cartColors)
+                                }
+                            },
+                            colors = ChipDefaults.secondaryChipColors(),
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
                 }
             }
             item {

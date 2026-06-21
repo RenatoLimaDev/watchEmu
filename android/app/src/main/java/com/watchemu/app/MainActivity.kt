@@ -115,7 +115,8 @@ class MainActivity : ComponentActivity() {
                             romFiles = roms,
                             isReceiving = receiving,
                             onReceive = { startBtReceive() },
-                            onRomSelected = { file -> loadRomBytes(file.readBytes(), file.nameWithoutExtension) }
+                            onRomSelected = { file -> loadRomBytes(file.readBytes(), file.nameWithoutExtension) },
+                            onRomDeleted = { file -> deleteRom(file) }
                         )
                         "game" -> {
                             BackHandler {
@@ -423,6 +424,16 @@ class MainActivity : ComponentActivity() {
             val romName = fileName.substringBeforeLast('.')
             loadRomBytes(bytes, romName)
         } catch (_: Exception) { }
+    }
+
+    private fun deleteRom(file: File) {
+        try {
+            file.delete()
+            // Also delete save state if exists
+            val savFile = File(getExternalFilesDir(null), "${file.nameWithoutExtension}.sav")
+            savFile.delete()
+        } catch (_: Exception) { }
+        scanForRoms()
     }
 
     private fun scanForRoms() {
