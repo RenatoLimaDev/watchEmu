@@ -2,6 +2,8 @@ package com.watchemu.app.ui
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -91,6 +93,7 @@ fun RomPickerScreen(
 ) {
     val listState = rememberScalingLazyListState()
 
+    Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colors.background)) {
     Scaffold(
         timeText = { TimeText() },
         positionIndicator = { PositionIndicator(scalingLazyListState = listState) },
@@ -206,6 +209,7 @@ fun RomPickerScreen(
                 Spacer(Modifier.height(16.dp))
             }
         }
+    }
     }
 }
 

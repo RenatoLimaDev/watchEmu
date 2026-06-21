@@ -337,16 +337,25 @@ class Mapper4(rom: Rom) : Mapper(rom) {
     }
 
     override fun step(scanline: Int, cycle: Int) {
+        // MMC3 scanline counter is clocked by the A12 rising edge during pattern
+        // fetches: once per visible scanline (and the pre-render line 261) at
+        // cycle 260. It only runs while rendering produces those fetches.
         if (cycle != 260) return
         if (scanline > 239 && scanline != 261) return
+
+        // Reload when zero or when a reload was requested ($C001); otherwise
+        // decrement. The IRQ fires ONLY on the non-zero -> zero transition
+        // (Sharp/MMC3B behaviour, as used by SMB3). Firing while the counter
+        // merely *equals* zero would re-assert the IRQ every scanline whenever
+        // the latch is 0, hanging the CPU in an interrupt storm.
         if (irqReload || irqCounter == 0) {
             irqCounter = irqLatch
             irqReload = false
         } else {
             irqCounter--
-        }
-        if (irqCounter == 0 && irqEnabled) {
-            irqPending = true
+            if (irqCounter == 0 && irqEnabled) {
+                irqPending = true
+            }
         }
     }
 

@@ -38,6 +38,7 @@ import kotlin.math.*
 class MainActivity : ComponentActivity() {
 
     private val nes = Nes()
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var gameBitmap = Bitmap.createBitmap(Ppu.WIDTH, Ppu.HEIGHT, Bitmap.Config.ARGB_8888)
     private var bitmapState = mutableStateOf<Bitmap?>(null)
     private var romLoadedState = mutableStateOf(false)
@@ -143,6 +144,18 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         scanForRoms()
+        // Resume emulation if we were in a game when the app went to background.
+        if (currentScreen.value == "game" && nes.romLoaded) {
+            startGameLoop()
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        // App is leaving the foreground: persist progress and stop the emulation
+        // thread so it doesn't keep burning CPU/battery while not visible.
+        if (nes.romLoaded) saveState()
+        nes.apu.stop()
     }
 
     override fun onDestroy() {
@@ -393,7 +406,8 @@ class MainActivity : ComponentActivity() {
                 nes.frameBuffer, 0, Ppu.WIDTH,
                 0, 0, Ppu.WIDTH, Ppu.HEIGHT
             )
-            android.os.Handler(android.os.Looper.getMainLooper()).post {
+            // Reuse a cached main-thread Handler instead of allocating one per frame.
+            mainHandler.post {
                 bitmapState.value = gameBitmap
                 frameCounter.intValue++
             }

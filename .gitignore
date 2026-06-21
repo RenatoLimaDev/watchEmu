@@ -1,0 +1,3 @@
+# Claude Code local settings (per-developer, not for the repo)
+.claude/
+**/.claude/

@@ -80,6 +80,7 @@ class Apu {
 
     private var audioTrack: AudioTrack? = null
     @Volatile private var running = false
+    private var emuThread: Thread? = null
 
     fun reset() {
         p1Duty = 0; p1Vol = 0; p1Period = 0; p1Len = 0; p1Halt = false; p1Const = false
@@ -207,7 +208,12 @@ class Apu {
      * @param onFrame Called from audio thread when a video frame completes
      */
     fun startWithEmulation(nes: Nes, onFrame: () -> Unit) {
-        if (running) return
+        // Make sure any previous emulation thread is fully dead before starting a
+        // new one. Without this, calling stop() then start() in quick succession
+        // can leave the old thread alive (it re-reads `running` after the new
+        // thread sets it true), stacking multiple emulation threads on the same
+        // NES and slowing everything down with each game launch.
+        stop()
         running = true
 
         val minBuf = AudioTrack.getMinBufferSize(
@@ -236,16 +242,24 @@ class Apu {
         audioTrack = track
         track.play()
 
-        Thread({
+        emuThread = Thread({
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO)
             val buf = FloatArray(512)
             var cycleAccum = 0.0
+            val bufTimeNs = (1_000_000_000L * buf.size / SAMPLE_RATE).toLong()
 
             while (running) {
+                val startNs = System.nanoTime()
+
                 // Generate one buffer of audio samples by running the emulation
                 for (i in 0 until buf.size) {
-                    // Run CPU instructions until we've accumulated enough cycles for one sample
-                    while (cycleAccum < CYCLES_PER_SAMPLE) {
+                    // Run CPU instructions until we've accumulated enough cycles for one sample.
+                    // The guard caps how many instructions a single sample may run: if the CPU
+                    // ever wedges (e.g. an interrupt storm that never advances PC), this keeps the
+                    // audio thread from spinning forever and freezing the picture.
+                    var guard = 0
+                    while (cycleAccum < CYCLES_PER_SAMPLE && guard < 1000) {
+                        guard++
                         val wasComplete = nes.ppu.frameComplete
                         val cycles = nes.stepInstruction()
                         cycleAccum += cycles
@@ -262,21 +276,33 @@ class Apu {
                     buf[i] = mixOneSample()
                 }
 
-                // Write the buffer - WRITE_BLOCKING ensures we pace to real-time
+                // Try to write audio; if it fails, fall back to manual timing
+                var audioOk = false
                 try {
                     val written = track.write(buf, 0, buf.size, AudioTrack.WRITE_BLOCKING)
-                    if (written < 0) {
-                        Thread.sleep(10)
-                    }
-                } catch (_: Exception) {
-                    Thread.sleep(10)
+                    audioOk = written > 0
+                } catch (_: Exception) { }
+
+                // If audio write didn't block (failed), pace manually
+                if (!audioOk) {
+                    val elapsed = System.nanoTime() - startNs
+                    val sleepMs = (bufTimeNs - elapsed) / 1_000_000
+                    if (sleepMs > 0) Thread.sleep(sleepMs)
                 }
             }
-        }, "NES-Audio-Emu").start()
+        }, "NES-Audio-Emu").also { it.start() }
     }
 
     fun stop() {
         running = false
+        // Wait for the emulation thread to actually exit so it can't keep
+        // stepping the NES after we return (avoids stacked/ghost emu threads).
+        emuThread?.let { t ->
+            if (t != Thread.currentThread()) {
+                try { t.join(500) } catch (_: InterruptedException) {}
+            }
+        }
+        emuThread = null
         audioTrack?.let {
             try { it.stop() } catch (_: Exception) {}
             it.release()

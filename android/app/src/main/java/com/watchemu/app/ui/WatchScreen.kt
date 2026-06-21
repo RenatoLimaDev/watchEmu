@@ -37,22 +37,38 @@ fun WatchScreen(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
+        // Layer 1: dark face + game image. This Canvas reads `frameCount`, so it
+        // is the only thing the runtime repaints every emulated frame (~60fps).
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            // Touch frameCount so this layer invalidates each new frame.
+            @Suppress("UNUSED_EXPRESSION") frameCount
+            val w = size.width
+            val h = size.height
+            val diameter = minOf(w, h)
+            val ox = (w - diameter) / 2f
+            val oy = (h - diameter) / 2f
+            drawGameLayer(ox, oy, diameter, bitmap, romLoaded, pressStart2P)
+        }
+
+        // Layer 2: bezel, A/B/SELECT/START buttons and analog stick. This Canvas
+        // does NOT read frameCount, so the runtime only repaints it when the
+        // bezel color or stick position actually changes — not 60x/second. The
+        // buttons/bezel are static, so this saves a huge amount of per-frame work.
         Canvas(modifier = Modifier.fillMaxSize()) {
             val w = size.width
             val h = size.height
             val diameter = minOf(w, h)
             val ox = (w - diameter) / 2f
             val oy = (h - diameter) / 2f
-            drawWatch(ox, oy, diameter, bitmap, romLoaded, bezelColor, bezelAccent, stickOffsetX, stickOffsetY, pressStart2P)
+            drawControlsLayer(ox, oy, diameter, bezelColor, bezelAccent, stickOffsetX, stickOffsetY, pressStart2P)
         }
     }
 }
 
-private fun DrawScope.drawWatch(
+/** Dark face + the emulated game image. Repainted every frame. */
+private fun DrawScope.drawGameLayer(
     ox: Float, oy: Float, diameter: Float,
     bitmap: Bitmap?, romLoaded: Boolean,
-    bezelColor: Color, bezelAccent: Color,
-    stickOffsetX: Float, stickOffsetY: Float,
     font: Typeface
 ) {
     val radius = diameter / 2f
@@ -108,6 +124,19 @@ private fun DrawScope.drawWatch(
         }
         drawContext.canvas.nativeCanvas.drawText("Loading...", centerX, centerY, textPaint)
     }
+}
+
+/** Bezel tray, face buttons and analog stick. Static — only repainted when the
+ *  bezel color or stick position changes, never per emulated frame. */
+private fun DrawScope.drawControlsLayer(
+    ox: Float, oy: Float, diameter: Float,
+    bezelColor: Color, bezelAccent: Color,
+    stickOffsetX: Float, stickOffsetY: Float,
+    font: Typeface
+) {
+    val radius = diameter / 2f
+    val centerX = ox + radius
+    val centerY = oy + radius
 
     // Bottom tray (golden crescent at bottom)
     val trayTop = oy + diameter * 0.82f
