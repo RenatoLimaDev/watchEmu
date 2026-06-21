@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>WatchEmu</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{
+  width:100%;height:100%;overflow:hidden;
+  background:#000;
+  -webkit-tap-highlight-color:transparent;
+  touch-action:none;user-select:none;
+  font-family:monospace;
+}
+body{display:flex;align-items:center;justify-content:center}
+
+.screen{
+  position:relative;
+  border-radius:50%;overflow:hidden;
+  background:radial-gradient(circle at 50% 38%,#0c0d10 0%,#050506 78%);
+  display:flex;align-items:center;justify-content:center;
+}
+#display{display:block;image-rendering:pixelated;position:relative;z-index:1}
+
+/* A button: top-left crescent */
+.face-a{
+  position:absolute;z-index:5;
+  top:0;left:10%;width:40%;height:12.5%;
+  border:none;background:#e8a820;color:#5a3000;
+  font-family:monospace;font-size:10px;font-weight:700;
+  display:flex;align-items:center;justify-content:flex-end;
+  padding-right:8%;padding-top:1%;
+  border-bottom:2px solid #6b3a10;border-right:1px solid #6b3a10;
+  touch-action:none;user-select:none;
+}
+/* B button: top-right crescent */
+.face-b{
+  position:absolute;z-index:5;
+  top:0;right:10%;width:40%;height:12.5%;
+  border:none;background:#e8a820;color:#5a3000;
+  font-family:monospace;font-size:10px;font-weight:700;
+  display:flex;align-items:center;justify-content:flex-start;
+  padding-left:8%;padding-top:1%;
+  border-bottom:2px solid #6b3a10;border-left:1px solid #6b3a10;
+  touch-action:none;user-select:none;
+}
+.face-a:active,.face-a.on{background:#f0c040;color:#3a1800}
+.face-b:active,.face-b.on{background:#f0c040;color:#3a1800}
+
+/* SELECT: left crescent */
+.side-select{
+  position:absolute;z-index:5;
+  left:0;top:10%;width:10.5%;height:80%;
+  border:none;background:#e8a820;color:#5a3000;
+  font-family:monospace;font-size:5px;font-weight:700;letter-spacing:.05em;
+  border-right:2px solid #6b3a10;
+  writing-mode:vertical-lr;text-orientation:mixed;
+  display:flex;align-items:center;justify-content:center;
+  touch-action:none;user-select:none;
+}
+/* START: right crescent */
+.side-start{
+  position:absolute;z-index:5;
+  right:0;top:10%;width:10.5%;height:80%;
+  border:none;background:#e8a820;color:#5a3000;
+  font-family:monospace;font-size:5px;font-weight:700;letter-spacing:.05em;
+  border-left:2px solid #6b3a10;
+  writing-mode:vertical-lr;text-orientation:mixed;
+  display:flex;align-items:center;justify-content:center;
+  touch-action:none;user-select:none;
+}
+.side-select:active,.side-select.on,
+.side-start:active,.side-start.on{background:#f0c040;color:#3a1800}
+
+/* Analog tray */
+.screen::after{
+  content:"";
+  position:absolute;bottom:-5%;left:50%;transform:translateX(-50%);
+  width:96%;height:20%;
+  background:#d4920a;border-top:2px solid #6b3a10;
+  z-index:4;pointer-events:none;
+}
+
+/* Bottom controls */
+.bottom-controls{
+  position:absolute;left:0;right:0;bottom:2%;z-index:5;
+  display:flex;align-items:center;justify-content:center;
+  pointer-events:none;
+}
+.analog{
+  pointer-events:auto;
+  position:relative;width:50px;height:50px;
+  touch-action:none;user-select:none;
+}
+.analog-base{
+  position:absolute;inset:0;border-radius:50%;
+  background:linear-gradient(180deg,#c8c0b0,#a89880);
+  border:2px solid #6b3a10;
+  box-shadow:inset 0 2px 4px rgba(0,0,0,.2);
+}
+.analog-stick{
+  position:absolute;width:30px;height:30px;border-radius:50%;
+  left:50%;top:50%;transform:translate(-50%,-50%);
+  background:linear-gradient(150deg,#e8e0d4,#c8c0b0);
+  border:2px solid #a89880;
+  box-shadow:0 3px 6px rgba(0,0,0,.3),inset 0 1px 0 rgba(255,255,255,.5);
+  transition:left .08s ease-out,top .08s ease-out;
+  pointer-events:none;
+}
+.analog.active .analog-stick{
+  transition:none;
+  background:linear-gradient(150deg,#f0d870,#d4a820);
+  border-color:#6b3a10;
+}
+
+.hint{
+  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  text-align:center;padding:0 22%;font-family:monospace;font-size:8px;
+  color:#444a54;line-height:1.6;pointer-events:none;z-index:10;
+}
+.hint.gone{display:none}
+</style>
+</head>
+<body>
+  <div class="screen" id="screen">
+    <canvas id="display"></canvas>
+    <button class="face-a" id="btnA">A</button>
+    <button class="face-b" id="btnB">B</button>
+    <button class="side-select" id="btnSelect">SELECT</button>
+    <button class="side-start" id="btnStart">START</button>
+    <div class="bottom-controls">
+      <div class="analog" id="analog">
+        <div class="analog-base"></div>
+        <div class="analog-stick" id="analogStick"></div>
+      </div>
+    </div>
+    <div class="hint" id="hint">Tap to load ROM</div>
+  </div>
+
+  <input type="file" id="file" accept=".nes,.zip" hidden>
+
+  <script src="fflate.min.js"></script>
+  <script src="jsnes.min.js"></script>
+  <script>
+(function(){
+  "use strict";
+  var NW=256,NH=240;
+
+  var screenEl=document.getElementById("screen");
+  var canvas=document.getElementById("display");
+  var dctx=canvas.getContext("2d");
+  var hint=document.getElementById("hint");
+
+  var diameter=Math.min(window.innerWidth,window.innerHeight);
+  screenEl.style.width=diameter+"px";
+  screenEl.style.height=diameter+"px";
+
+  var dpr=Math.min(window.devicePixelRatio||1,2);
+  canvas.width=Math.round(diameter*dpr);
+  canvas.height=Math.round(diameter*dpr);
+  canvas.style.width=diameter+"px";
+  canvas.style.height=diameter+"px";
+  dctx.setTransform(dpr,0,0,dpr,0,0);
+  dctx.imageSmoothingEnabled=false;
+
+  var buf=document.createElement("canvas");
+  buf.width=NW;buf.height=NH;
+  var bctx=buf.getContext("2d");
+  var image=bctx.createImageData(NW,NH);
+  var fb_u32=new Uint32Array(image.data.buffer);
+  for(var i=0;i<fb_u32.length;i++)fb_u32[i]=0xff000000;
+
+  var SAMPLES=8192,MASK=SAMPLES-1;
+  var aL=new Float32Array(SAMPLES),aR=new Float32Array(SAMPLES);
+  var wr=0,rd=0,audioCtx=null,gain=null;
+
+  function initAudio(){
+    if(audioCtx)return;
+    var AC=window.AudioContext||window.webkitAudioContext;
+    if(!AC)return;
+    audioCtx=new AC();
+    gain=audioCtx.createGain();
+    gain.gain.value=0.6;
+    var node=audioCtx.createScriptProcessor(1024,0,2);
+    node.onaudioprocess=function(e){
+      var l=e.outputBuffer.getChannelData(0);
+      var r=e.outputBuffer.getChannelData(1);
+      for(var i=0;i<l.length;i++){
+        if(rd!==wr){l[i]=aL[rd];r[i]=aR[rd];rd=(rd+1)&MASK;}
+        else{l[i]=0;r[i]=0;}
+      }
+    };
+    node.connect(gain);gain.connect(audioCtx.destination);
+  }
+  function resumeAudio(){if(audioCtx&&audioCtx.state==="suspended")audioCtx.resume();}
+
+  var romLoaded=false,running=false;
+  var nes=new jsnes.NES({
+    onFrame:function(fb24){
+      for(var i=0;i<fb24.length;i++)fb_u32[i]=0xff000000|fb24[i];
+    },
+    onAudioSample:function(left,right){
+      var next=(wr+1)&MASK;
+      if(next!==rd){aL[wr]=left;aR[wr]=right;wr=next;}
+    }
+  });
+
+  function gameRect(){
+    var dw=diameter*0.84;
+    var dh=dw*(NH/NW);
+    var dx=(diameter-dw)/2;
+    var dy=(diameter-dh)/2-diameter*0.01;
+    return{dx:dx,dy:dy,dw:dw,dh:dh};
+  }
+
+  function drawIdle(){
+    var g=gameRect();
+    dctx.save();
+    dctx.beginPath();
+    dctx.roundRect(g.dx,g.dy,g.dw,g.dh,0);
+    dctx.clip();
+    dctx.fillStyle="#8bac0f";
+    dctx.fillRect(g.dx,g.dy,g.dw,g.dh);
+    dctx.strokeStyle="rgba(48,72,0,.12)";
+    dctx.lineWidth=1;
+    var step=g.dw/20;
+    for(var i=0;i<=20;i++){var x=g.dx+i*step;dctx.beginPath();dctx.moveTo(x,g.dy);dctx.lineTo(x,g.dy+g.dh);dctx.stroke();}
+    var stepY=g.dh/18;
+    for(var j=0;j<=18;j++){var y=g.dy+j*stepY;dctx.beginPath();dctx.moveTo(g.dx,y);dctx.lineTo(g.dx+g.dw,y);dctx.stroke();}
+    dctx.restore();
+    dctx.fillStyle="#306230";
+    dctx.font="8px monospace";
+    dctx.textAlign="center";
+    dctx.fillText("WatchEmu",diameter/2,g.dy+g.dh/2);
+  }
+
+  function draw(){
+    dctx.clearRect(0,0,diameter,diameter);
+    if(!romLoaded){drawIdle();return;}
+    bctx.putImageData(image,0,0);
+    var g=gameRect();
+    dctx.save();
+    dctx.beginPath();
+    dctx.roundRect(g.dx,g.dy,g.dw,g.dh,0);
+    dctx.clip();
+    dctx.imageSmoothingEnabled=false;
+    dctx.drawImage(buf,0,0,NW,NH,g.dx,g.dy,g.dw,g.dh);
+    dctx.restore();
+  }
+
+  var STEP=1000/60.0988;
+  var last=performance.now(),acc=0;
+  function loop(now){
+    requestAnimationFrame(loop);
+    var dt=now-last;last=now;
+    if(running&&romLoaded){
+      acc+=dt;var ran=0;
+      while(acc>=STEP&&ran<4){nes.frame();acc-=STEP;ran++;}
+      if(acc>200)acc=0;
+    }
+    draw();
+  }
+  requestAnimationFrame(loop);
+
+  var C=jsnes.Controller;
+  var press=function(btn){nes.buttonDown(1,btn);};
+  var release=function(btn){nes.buttonUp(1,btn);};
+
+  function bind(el,btn){
+    el.addEventListener("pointerdown",function(e){
+      e.preventDefault();resumeAudio();
+      try{el.setPointerCapture(e.pointerId);}catch(_){}
+      el.classList.add("on");press(btn);
+    });
+    function up(e){
+      if(e){e.preventDefault();try{el.releasePointerCapture(e.pointerId);}catch(_){}}
+      el.classList.remove("on");release(btn);
+    }
+    el.addEventListener("pointerup",up);
+    el.addEventListener("pointercancel",up);
+    el.addEventListener("contextmenu",function(e){e.preventDefault();});
+  }
+  bind(document.getElementById("btnA"),C.BUTTON_A);
+  bind(document.getElementById("btnB"),C.BUTTON_B);
+  bind(document.getElementById("btnStart"),C.BUTTON_START);
+  bind(document.getElementById("btnSelect"),C.BUTTON_SELECT);
+
+  (function(){
+    var el=document.getElementById("analog");
+    var stick=document.getElementById("analogStick");
+    var DEAD=0.25,active=false,cx=0,cy=0,dirX=0,dirY=0;
+    function setDir(nx,ny){
+      if(nx!==dirX){
+        if(dirX===-1)release(C.BUTTON_LEFT);if(dirX===1)release(C.BUTTON_RIGHT);
+        dirX=nx;
+        if(dirX===-1)press(C.BUTTON_LEFT);if(dirX===1)press(C.BUTTON_RIGHT);
+      }
+      if(ny!==dirY){
+        if(dirY===-1)release(C.BUTTON_UP);if(dirY===1)release(C.BUTTON_DOWN);
+        dirY=ny;
+        if(dirY===-1)press(C.BUTTON_UP);if(dirY===1)press(C.BUTTON_DOWN);
+      }
+    }
+    function update(ex,ey){
+      var r=el.getBoundingClientRect(),radius=r.width/2;
+      var dx=ex-cx,dy=ey-cy;
+      var dist=Math.sqrt(dx*dx+dy*dy),maxDist=radius-6;
+      if(dist>maxDist){dx=dx/dist*maxDist;dy=dy/dist*maxDist;}
+      var norm=Math.min(dist/maxDist,1);
+      stick.style.left=(radius+dx)+"px";stick.style.top=(radius+dy)+"px";
+      if(norm>DEAD){
+        var angle=Math.atan2(dy,dx);
+        setDir(Math.cos(angle)>0.4?1:(Math.cos(angle)<-0.4?-1:0),
+               Math.sin(angle)>0.4?1:(Math.sin(angle)<-0.4?-1:0));
+      }else{setDir(0,0);}
+    }
+    el.addEventListener("pointerdown",function(e){
+      e.preventDefault();resumeAudio();active=true;
+      var r=el.getBoundingClientRect();cx=r.left+r.width/2;cy=r.top+r.height/2;
+      el.classList.add("active");
+      try{el.setPointerCapture(e.pointerId);}catch(_){}
+      update(e.clientX,e.clientY);
+    });
+    el.addEventListener("pointermove",function(e){if(active)update(e.clientX,e.clientY);});
+    function end(e){
+      if(!active)return;active=false;
+      try{el.releasePointerCapture(e.pointerId);}catch(_){}
+      el.classList.remove("active");setDir(0,0);
+      stick.style.left="50%";stick.style.top="50%";
+    }
+    el.addEventListener("pointerup",end);
+    el.addEventListener("pointercancel",end);
+    el.addEventListener("contextmenu",function(e){e.preventDefault();});
+  })();
+
+  function loadNESBytes(bytes){
+    try{
+      var s="",CH=0x8000;
+      for(var i=0;i<bytes.length;i+=CH)
+        s+=String.fromCharCode.apply(null,bytes.subarray(i,i+CH));
+      nes.loadROM(s);
+      romLoaded=true;running=true;
+      hint.classList.add("gone");
+      initAudio();resumeAudio();
+    }catch(err){
+      hint.textContent="ROM error: "+(err&&err.message?err.message:err);
+    }
+  }
+
+  var fileInput=document.getElementById("file");
+  hint.style.pointerEvents="auto";
+  hint.addEventListener("pointerdown",function(){fileInput.click();});
+
+  fileInput.addEventListener("change",function(e){
+    var f=e.target.files[0];if(!f)return;
+    var reader=new FileReader();
+    reader.onload=function(){
+      var bytes=new Uint8Array(reader.result);
+      var isZip=(bytes[0]===0x50&&bytes[1]===0x4B)||/\.zip$/i.test(f.name);
+      if(isZip&&typeof fflate!=="undefined"){
+        try{
+          var files=fflate.unzipSync(bytes);
+          var names=Object.keys(files).filter(function(n){return!n.endsWith("/");});
+          var entry=names.find(function(n){return/\.nes$/i.test(n);});
+          if(entry)bytes=files[entry];
+          else{hint.textContent="No .nes in zip";return;}
+        }catch(err){hint.textContent="Zip error";return;}
+      }
+      loadNESBytes(bytes);
+    };
+    reader.readAsArrayBuffer(f);
+  });
+
+  window.loadRomFromAndroid=function(base64){
+    var bin=atob(base64);
+    var bytes=new Uint8Array(bin.length);
+    for(var i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);
+    loadNESBytes(bytes);
+  };
+})();
+  </script>
+</body>
+</html>

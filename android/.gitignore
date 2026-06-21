@@ -1,0 +1,19 @@
+*.nes
+*.sav
+*.zip
+
+# Gradle
+.gradle/
+build/
+local.properties
+
+# IDE
+.idea/
+*.iml
+
+# APK
+*.apk
+
+# Screenshots (root only, not res/)
+/*.png
+!app/src/main/res/**/*.png
