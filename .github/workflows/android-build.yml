@@ -1,0 +1,43 @@
+name: Build Amazfit Stratos APK
+
+# Builds the debug APK so it can be downloaded and sideloaded onto the watch
+# without needing a local Android Studio install. Runs on pushes to the Stratos
+# branch and can be triggered manually from the Actions tab.
+on:
+  push:
+    branches:
+      - claude/amazfit-stratos-apm22-uqio1n
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK packages
+        run: sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Build debug APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: watchemu-stratos-debug
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error

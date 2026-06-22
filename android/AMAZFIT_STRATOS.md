@@ -17,16 +17,40 @@ This branch adapts the native Wear OS build so it installs and runs on the
 | Font loading | `Resources.getFont()` (API 26+) | `ResourcesCompat.getFont()` (API 16+) — the old call crashed on API 22 |
 
 The emulator core (`nes/`), audio-driven game loop, save states, ROM scanning,
-Bluetooth receive, and the in-game `WatchScreen` rendering are unchanged. The
-round-watch control layout (floating d-pad on the bottom half, radial
-SELECT/START/B/A on the top half, long-press to reveal areas) still applies
-because the Stratos is also a round display.
+Bluetooth receive, and save states are unchanged. The round-watch control
+layout (floating d-pad on the bottom half, radial SELECT/START/B/A on the top
+half, long-press to reveal areas) still applies because the Stratos is round.
+
+## Robustness changes for this hardware
+
+- **Game rendering on a `TextureView`** (`GameView`), driven from the emulation
+  thread, instead of recomposing a Compose `Canvas` every frame. Each frame is
+  now just a cached-shell blit plus one scaled bitmap draw — far lighter on the
+  Stratos's SoC. The Compose layer only paints the transient control overlay.
+- **Audio failure no longer freezes the game.** The emulation is audio-driven,
+  so a missing/broken audio path would otherwise stop it. Now the `AudioTrack`
+  is created defensively and, if it fails, the APU runs a silent wall-clock
+  loop. A watchdog in `MainActivity` also detects a stalled audio thread (no
+  frame for 1.5 s) and restarts emulation silently, so the game keeps running.
+- **Physical buttons**: the side buttons are mapped as NES inputs where their
+  key codes are known (volume keys → A/B, center/enter → Start; Back still
+  exits). Unrecognised key codes are logged to `WatchEmu` so the exact mapping
+  can be confirmed with `adb logcat -s WatchEmu` and added.
+- **Bigger touch d-pad** tuned for the 320×300 screen.
+- The AGSL fisheye/CRT shader was removed (it needed API 33, unavailable here).
 
 ## Building
 
+A GitHub Actions workflow (`.github/workflows/android-build.yml`) builds the
+debug APK on every push to the Stratos branch and uploads it as the
+`watchemu-stratos-debug` artifact — download it from the run's **Artifacts**
+section, no local toolchain needed.
+
+To build locally instead:
+
 ```bash
 cd android
-./gradlew assembleRelease   # or assembleDebug
+./gradlew assembleDebug   # or assembleRelease
 ```
 
 Output: `android/app/build/outputs/apk/`.
@@ -56,10 +80,12 @@ adb push game.nes /sdcard/Download/
 
 ## Known limitations on this hardware
 
-- **Performance**: the Stratos SoC is modest. Jetpack Compose plus full-speed
-  NES emulation may not hold a steady 60 fps in heavier games.
-- **Fisheye/CRT shader**: the AGSL barrel-distortion effect needs API 33 and is
-  automatically disabled here (the picture renders flat).
-- **Physical buttons**: gameplay is via the touchscreen overlay. The side
-  buttons keep their system roles (e.g. back/exit); on-screen controls drive the
-  NES inputs.
+- **Performance**: the Stratos SoC is modest. Even with the TextureView
+  rendering path, full-speed NES emulation may not hold a steady 60 fps in
+  heavier games.
+- **Audio latency**: sound (when a Bluetooth headset is connected) is routed via
+  A2DP, which adds noticeable delay. Game speed stays correct; only the audio
+  lags. With no audio device the game runs silently.
+- **Physical button mapping is provisional**: it assumes the common Stratos key
+  codes. If a side button does nothing, check `adb logcat -s WatchEmu` for the
+  logged `Unmapped keyCode=...` and report it so the mapping can be finalised.

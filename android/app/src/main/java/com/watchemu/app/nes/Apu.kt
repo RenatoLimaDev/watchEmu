@@ -207,7 +207,7 @@ class Apu {
      * @param nes The NES instance to step
      * @param onFrame Called from audio thread when a video frame completes
      */
-    fun startWithEmulation(nes: Nes, onFrame: () -> Unit) {
+    fun startWithEmulation(nes: Nes, forceSilent: Boolean = false, onFrame: () -> Unit) {
         // Make sure any previous emulation thread is fully dead before starting a
         // new one. Without this, calling stop() then start() in quick succession
         // can leave the old thread alive (it re-reads `running` after the new
@@ -216,31 +216,48 @@ class Apu {
         stop()
         running = true
 
-        val minBuf = AudioTrack.getMinBufferSize(
-            SAMPLE_RATE, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_FLOAT
-        )
-        val bufBytes = (minBuf * 2).coerceAtLeast(4096)
+        // The Amazfit Stratos has no speaker and a non-standard audio HAL, so
+        // creating or starting the AudioTrack may throw. Build it defensively:
+        // any failure (or forceSilent) drops us into a silent, wall-clock paced
+        // loop so the game still runs instead of never starting.
+        val track: AudioTrack? = if (forceSilent) null else run {
+            var t: AudioTrack? = null
+            try {
+                val minBuf = AudioTrack.getMinBufferSize(
+                    SAMPLE_RATE, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_FLOAT
+                )
+                val bufBytes = (minBuf * 2).coerceAtLeast(4096)
+                t = AudioTrack.Builder()
+                    .setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_GAME)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                            .build()
+                    )
+                    .setAudioFormat(
+                        AudioFormat.Builder()
+                            .setSampleRate(SAMPLE_RATE)
+                            .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                            .setEncoding(AudioFormat.ENCODING_PCM_FLOAT)
+                            .build()
+                    )
+                    .setBufferSizeInBytes(bufBytes)
+                    .setTransferMode(AudioTrack.MODE_STREAM)
+                    .build()
+                t.play()
+                t
+            } catch (_: Throwable) {
+                try { t?.release() } catch (_: Throwable) {}
+                null
+            }
+        }
 
-        val track = AudioTrack.Builder()
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(AudioAttributes.USAGE_GAME)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .build()
-            )
-            .setAudioFormat(
-                AudioFormat.Builder()
-                    .setSampleRate(SAMPLE_RATE)
-                    .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                    .setEncoding(AudioFormat.ENCODING_PCM_FLOAT)
-                    .build()
-            )
-            .setBufferSizeInBytes(bufBytes)
-            .setTransferMode(AudioTrack.MODE_STREAM)
-            .build()
+        if (track == null) {
+            startSilentEmulation(nes, onFrame)
+            return
+        }
 
         audioTrack = track
-        track.play()
 
         emuThread = Thread({
             android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO)
@@ -291,6 +308,27 @@ class Apu {
                 }
             }
         }, "NES-Audio-Emu").also { it.start() }
+    }
+
+    /**
+     * Audio-free emulation paced by the wall clock (~60 fps). Used when the
+     * device has no usable audio output (e.g. the Amazfit Stratos with no
+     * headphones connected, or a firmware whose AudioTrack stalls), so the game
+     * still runs — silently — instead of freezing. The APU state still advances
+     * inside nes.frame(), so audio resumes correctly if restarted with sound.
+     */
+    private fun startSilentEmulation(nes: Nes, onFrame: () -> Unit) {
+        emuThread = Thread({
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_DISPLAY)
+            val frameNs = 1_000_000_000L / 60L
+            while (running) {
+                val startNs = System.nanoTime()
+                nes.frame()
+                onFrame()
+                val sleepMs = (frameNs - (System.nanoTime() - startNs)) / 1_000_000
+                if (sleepMs > 0) try { Thread.sleep(sleepMs) } catch (_: InterruptedException) {}
+            }
+        }, "NES-Silent-Emu").also { it.start() }
     }
 
     fun stop() {

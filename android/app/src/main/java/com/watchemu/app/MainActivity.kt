@@ -39,11 +39,16 @@ import kotlin.math.*
 class MainActivity : ComponentActivity() {
 
     private val nes = Nes()
-    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var gameBitmap = Bitmap.createBitmap(Ppu.WIDTH, Ppu.HEIGHT, Bitmap.Config.ARGB_8888)
-    private var bitmapState = mutableStateOf<Bitmap?>(null)
     private var romLoadedState = mutableStateOf(false)
-    private var frameCounter = mutableIntStateOf(0)
+    // The in-game TextureView, captured when the game screen is created. Frames
+    // are pushed straight to it from the emulation thread (no per-frame Compose).
+    @Volatile private var gameSurface: com.watchemu.app.ui.GameView? = null
+    // Watchdog state: timestamp (ns) of the last produced frame, and whether we
+    // already restarted emulation in silent (no-audio) mode after a stall.
+    @Volatile private var lastFrameNs = 0L
+    private var silentMode = false
+    private var watchdogJob: Job? = null
 
     private var currentScreen = mutableStateOf("picker")
     private var romFiles = mutableStateOf<List<File>>(emptyList())
@@ -68,10 +73,6 @@ class MainActivity : ComponentActivity() {
     // Start/Select corner overlay state (top corners).
     var btnStartActive = mutableStateOf(false)
     var btnSelectActive = mutableStateOf(false)
-    // Fisheye level: 0 = off (flat), 1 = subtle. Toggled by double-tap (center).
-    var fisheyeLevel = mutableIntStateOf(0)
-    // Double-tap detection (center strip) to toggle the fisheye level.
-    private var lastCenterTapNs = 0L
     // Controls are invisible by default; a long-press on the center reveals all
     // button areas for a moment so the player can recall the layout.
     var showAreas = mutableStateOf(false)
@@ -108,22 +109,14 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val screen by currentScreen
-            val bitmap by bitmapState
-            val loaded by romLoadedState
-            val frame by frameCounter
             val roms by romFiles
             val receiving by btReceiving
-            // Floating d-pad + A/B overlay state
+            // Floating d-pad overlay state
             val dpadOn by dpadActive
             val dpadX by dpadCx
             val dpadY by dpadCy
             val knobX by dpadKnobX
             val knobY by dpadKnobY
-            val aOn by btnAActive
-            val bOn by btnBActive
-            val startOn by btnStartActive
-            val selectOn by btnSelectActive
-            val fisheye by fisheyeLevel
             val areasVisible by showAreas
             val romAwaitingChoice by pendingRom
 
@@ -164,27 +157,19 @@ class MainActivity : ComponentActivity() {
                         "game" -> {
                             BackHandler {
                                 saveState()
-                                nes.apu.stop()
+                                stopEmulation()
                                 romLoadedState.value = false
-                                bitmapState.value = null
                                 currentScreen.value = "picker"
                                 // Back to the menu: let the screen sleep normally again.
                                 window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                             }
                             WatchScreen(
-                                bitmap = bitmap,
-                                romLoaded = loaded,
-                                frameCount = frame,
+                                onSurfaceCreated = { gameSurface = it },
                                 dpadActive = dpadOn,
                                 dpadCx = dpadX,
                                 dpadCy = dpadY,
                                 dpadKnobX = knobX,
                                 dpadKnobY = knobY,
-                                buttonAActive = aOn,
-                                buttonBActive = bOn,
-                                buttonStartActive = startOn,
-                                buttonSelectActive = selectOn,
-                                fisheyeLevel = fisheye,
                                 showAreas = areasVisible
                             )
                         }
@@ -216,9 +201,11 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         scanForRoms()
         // Resume emulation if we were in a game when the app went to background.
+        // Preserve silent mode so a device with no audio doesn't freeze for the
+        // watchdog timeout again on every resume.
         if (currentScreen.value == "game" && nes.romLoaded) {
             window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            startGameLoop()
+            startGameLoop(silent = silentMode)
         }
     }
 
@@ -227,14 +214,14 @@ class MainActivity : ComponentActivity() {
         // App is leaving the foreground: persist progress and stop the emulation
         // thread so it doesn't keep burning CPU/battery while not visible.
         if (nes.romLoaded) saveState()
-        nes.apu.stop()
+        stopEmulation()
     }
 
     override fun onDestroy() {
         super.onDestroy()
         saveState()
         scanJob?.cancel()
-        nes.apu.stop()
+        stopEmulation()
     }
 
     private fun startBtReceive() {
@@ -328,26 +315,16 @@ class MainActivity : ComponentActivity() {
         return true
     }
 
-    /** Route a new finger: left half drives the floating d-pad, right half the A/B buttons. */
+    /** Route a new finger: bottom half drives the floating d-pad, top half the action buttons. */
     private fun handleTouchDown(id: Int, ex: Float, ey: Float, w: Float, diameter: Float) {
-        // Center strip is a neutral zone (boundary between d-pad and A/B halves):
-        //  - double tap toggles the fisheye
-        //  - long press reveals all button areas for a moment
+        // Center neutral zone: a long press there reveals all button areas for a
+        // moment so the player can recall the (invisible) layout.
         val h = window.decorView.height.toFloat()
-        if (ex in w * 0.42f..w * 0.58f && ey in h * 0.30f..h * 0.70f) {
-            val now = System.nanoTime()
-            if (now - lastCenterTapNs < 300_000_000L) {  // 300ms = double tap
-                fisheyeLevel.intValue = (fisheyeLevel.intValue + 1) % 2  // off <-> subtle
-                lastCenterTapNs = 0L
-                longPressJob?.cancel()
-            } else {
-                lastCenterTapNs = now
-                // Arm long-press: if the finger stays put ~500ms, reveal areas.
-                longPressJob?.cancel()
-                longPressJob = CoroutineScope(Dispatchers.Main).launch {
-                    delay(500)
-                    revealAreas()
-                }
+        if (ex in w * 0.42f..w * 0.58f && ey in h * 0.34f..h * 0.66f) {
+            longPressJob?.cancel()
+            longPressJob = CoroutineScope(Dispatchers.Main).launch {
+                delay(500)
+                revealAreas()
             }
             return
         }
@@ -360,7 +337,9 @@ class MainActivity : ComponentActivity() {
                 analogPointerId = id
                 analogCenterX = ex
                 analogCenterY = ey
-                analogRadius = diameter * 0.11f
+                // Larger touch radius than the Wear build: the Stratos screen is
+                // only 320x300, so a bigger d-pad is easier to steer with a thumb.
+                analogRadius = diameter * 0.13f
                 dpadActive.value = true
                 dpadCx.floatValue = ex
                 dpadCy.floatValue = ey
@@ -411,17 +390,27 @@ class MainActivity : ComponentActivity() {
     }
 
     /** Map a physical key to a NES button, or -1 if it isn't a game key.
-     *  Lets you play on the emulator/PC without touch:
-     *  arrows = d-pad, Z = A, X = B, Enter = Start, Right-Shift = Select. */
+     *  Covers a keyboard/gamepad (arrows/Z/X/Enter/Shift, gamepad buttons) and
+     *  the Amazfit Stratos side buttons, which on most firmwares emit
+     *  DPAD_CENTER and the volume keys. BACK is deliberately left unmapped so it
+     *  still exits the game; unknown codes are logged in onKeyDown so the exact
+     *  Stratos mapping can be confirmed on the device. */
     private fun nesButtonForKey(keyCode: Int): Int = when (keyCode) {
         android.view.KeyEvent.KEYCODE_DPAD_UP -> Controller.BUTTON_UP
         android.view.KeyEvent.KEYCODE_DPAD_DOWN -> Controller.BUTTON_DOWN
         android.view.KeyEvent.KEYCODE_DPAD_LEFT -> Controller.BUTTON_LEFT
         android.view.KeyEvent.KEYCODE_DPAD_RIGHT -> Controller.BUTTON_RIGHT
-        android.view.KeyEvent.KEYCODE_Z -> Controller.BUTTON_A
-        android.view.KeyEvent.KEYCODE_X -> Controller.BUTTON_B
-        android.view.KeyEvent.KEYCODE_ENTER, android.view.KeyEvent.KEYCODE_NUMPAD_ENTER -> Controller.BUTTON_START
-        android.view.KeyEvent.KEYCODE_SHIFT_RIGHT -> Controller.BUTTON_SELECT
+        android.view.KeyEvent.KEYCODE_Z,
+        android.view.KeyEvent.KEYCODE_BUTTON_A,
+        android.view.KeyEvent.KEYCODE_VOLUME_UP -> Controller.BUTTON_A
+        android.view.KeyEvent.KEYCODE_X,
+        android.view.KeyEvent.KEYCODE_BUTTON_B,
+        android.view.KeyEvent.KEYCODE_VOLUME_DOWN -> Controller.BUTTON_B
+        android.view.KeyEvent.KEYCODE_ENTER,
+        android.view.KeyEvent.KEYCODE_NUMPAD_ENTER,
+        android.view.KeyEvent.KEYCODE_DPAD_CENTER -> Controller.BUTTON_START
+        android.view.KeyEvent.KEYCODE_SHIFT_RIGHT,
+        android.view.KeyEvent.KEYCODE_BUTTON_SELECT -> Controller.BUTTON_SELECT
         else -> -1
     }
 
@@ -431,6 +420,14 @@ class MainActivity : ComponentActivity() {
             if (btn >= 0) {
                 if (event.repeatCount == 0) nes.buttonDown(btn)
                 return true
+            }
+            // Surface any unrecognised key (except Back) so the Stratos side
+            // buttons can be identified via `adb logcat -s WatchEmu`.
+            if (keyCode != android.view.KeyEvent.KEYCODE_BACK) {
+                android.util.Log.i(
+                    "WatchEmu",
+                    "Unmapped keyCode=$keyCode (${android.view.KeyEvent.keyCodeToString(keyCode)})"
+                )
             }
         }
         return super.onKeyDown(keyCode, event)
@@ -547,23 +544,49 @@ class MainActivity : ComponentActivity() {
         } catch (_: Exception) { }
     }
 
-    private fun startGameLoop() {
-        nes.apu.stop()
-        // Audio-driven emulation: the audio thread runs the NES CPU/PPU,
-        // producing frames as a side effect of generating audio samples.
-        // This ensures audio is never starved and game speed is correct.
-        nes.apu.startWithEmulation(nes) {
-            // Called from audio thread when a video frame completes
+    private fun startGameLoop(silent: Boolean = false) {
+        silentMode = silent
+        lastFrameNs = System.nanoTime()
+        // Audio-driven emulation: the emulation thread runs the NES CPU/PPU,
+        // producing frames as a side effect of generating audio samples, so game
+        // speed stays correct. If audio is unavailable (silent=true, or the
+        // AudioTrack fails inside the APU), it falls back to a wall-clock loop.
+        nes.apu.startWithEmulation(nes, forceSilent = silent) {
+            // Called from the emulation thread when a video frame completes.
+            // The TextureView can be drawn from any thread, so the frame is
+            // pushed straight to it — no per-frame Compose work.
             gameBitmap.setPixels(
                 nes.frameBuffer, 0, Ppu.WIDTH,
                 0, 0, Ppu.WIDTH, Ppu.HEIGHT
             )
-            // Reuse a cached main-thread Handler instead of allocating one per frame.
-            mainHandler.post {
-                bitmapState.value = gameBitmap
-                frameCounter.intValue++
+            gameSurface?.submitFrame(gameBitmap)
+            lastFrameNs = System.nanoTime()
+        }
+        startWatchdog()
+    }
+
+    /** If the audio-driven loop stalls (e.g. the Stratos AudioTrack blocks with
+     *  no real output sink), no frame is produced. Detect that and restart
+     *  emulation in silent mode so the game keeps running instead of freezing. */
+    private fun startWatchdog() {
+        watchdogJob?.cancel()
+        watchdogJob = CoroutineScope(Dispatchers.Main).launch {
+            while (isActive) {
+                delay(700)
+                if (currentScreen.value != "game" || !nes.romLoaded || silentMode) continue
+                if (System.nanoTime() - lastFrameNs > 1_500_000_000L) {
+                    startGameLoop(silent = true)
+                    return@launch
+                }
             }
         }
+    }
+
+    /** Stop the emulation thread and the watchdog together. */
+    private fun stopEmulation() {
+        watchdogJob?.cancel()
+        watchdogJob = null
+        nes.apu.stop()
     }
 
     override fun onNewIntent(intent: Intent) {
