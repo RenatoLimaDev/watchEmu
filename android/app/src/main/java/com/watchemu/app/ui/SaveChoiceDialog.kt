@@ -8,6 +8,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.Button
+import androidx.compose.material.ButtonDefaults
+import androidx.compose.material.MaterialTheme
+import androidx.compose.material.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -16,10 +20,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.wear.compose.material.Chip
-import androidx.wear.compose.material.ChipDefaults
-import androidx.wear.compose.material.MaterialTheme
-import androidx.wear.compose.material.Text
+import com.watchemu.app.ui.theme.OnSurfaceVariant
 
 /**
  * Overlay shown when the tapped ROM has a save file. Lets the player resume the
@@ -42,7 +43,7 @@ fun SaveChoiceDialog(
     ) {
         Text(
             text = gameName,
-            style = MaterialTheme.typography.title3,
+            style = MaterialTheme.typography.h6,
             color = MaterialTheme.colors.primary,
             textAlign = TextAlign.Center,
             maxLines = 2,
@@ -51,37 +52,39 @@ fun SaveChoiceDialog(
         Spacer(Modifier.height(2.dp))
         Text(
             text = "Save encontrado",
-            style = MaterialTheme.typography.caption2,
-            color = MaterialTheme.colors.onSurfaceVariant,
+            style = MaterialTheme.typography.caption,
+            color = OnSurfaceVariant,
             textAlign = TextAlign.Center
         )
         Spacer(Modifier.height(10.dp))
 
-        Chip(
+        Button(
             onClick = onContinue,
-            label = {
-                Text(
-                    "Continuar",
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.fillMaxWidth(),
-                    textAlign = TextAlign.Center
-                )
-            },
-            colors = ChipDefaults.primaryChipColors(),
+            colors = ButtonDefaults.buttonColors(
+                backgroundColor = MaterialTheme.colors.primary,
+                contentColor = MaterialTheme.colors.onPrimary
+            ),
             modifier = Modifier.fillMaxWidth()
-        )
+        ) {
+            Text(
+                "Continuar",
+                fontWeight = FontWeight.Bold,
+                textAlign = TextAlign.Center
+            )
+        }
         Spacer(Modifier.height(6.dp))
-        Chip(
+        Button(
             onClick = onNewGame,
-            label = {
-                Text(
-                    "Novo jogo",
-                    modifier = Modifier.fillMaxWidth(),
-                    textAlign = TextAlign.Center
-                )
-            },
-            colors = ChipDefaults.secondaryChipColors(),
+            colors = ButtonDefaults.buttonColors(
+                backgroundColor = MaterialTheme.colors.surface,
+                contentColor = MaterialTheme.colors.onSurface
+            ),
             modifier = Modifier.fillMaxWidth()
-        )
+        ) {
+            Text(
+                "Novo jogo",
+                textAlign = TextAlign.Center
+            )
+        }
     }
 }

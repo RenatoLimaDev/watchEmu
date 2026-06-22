@@ -80,9 +80,12 @@ fun WatchScreen(
     val context = LocalContext.current
     val pressStart2P = remember {
         try {
-            context.resources.getFont(
+            // ResourcesCompat.getFont works back to API 16; Resources.getFont is
+            // API 26+ and would crash on the Amazfit Stratos (Android 5.1).
+            androidx.core.content.res.ResourcesCompat.getFont(
+                context,
                 context.resources.getIdentifier("press_start_2p", "font", context.packageName)
-            )
+            ) ?: Typeface.MONOSPACE
         } catch (_: Exception) {
             Typeface.MONOSPACE
         }

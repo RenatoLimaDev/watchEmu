@@ -9,7 +9,9 @@ android {
 
     defaultConfig {
         applicationId = "com.watchemu.app"
-        minSdk = 26
+        // Amazfit Stratos runs Android 5.1.1 (API 22). It is NOT a Wear OS
+        // device, so the app targets plain Android down to Lollipop.
+        minSdk = 22
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
@@ -52,18 +54,13 @@ dependencies {
     // Animation
     implementation("androidx.compose.animation:animation")
 
-    // Material Icons Extended
+    // Regular Jetpack Compose Material (minSdk 21) — replaces Wear Compose so the
+    // app installs and runs on plain Android 5.1 (Amazfit Stratos), which has no
+    // Wear OS runtime. Provides MaterialTheme, Text, Icon, Button, Surface, etc.
+    implementation("androidx.compose.material:material")
+
+    // Material Icons Extended (Bluetooth / Delete glyphs used in the ROM picker)
     implementation("androidx.compose.material:material-icons-extended")
-
-    // Wear OS Compose
-    implementation("androidx.wear.compose:compose-material:1.3.0")
-    implementation("androidx.wear.compose:compose-foundation:1.3.0")
-
-    // Wear OS Navigation
-    implementation("androidx.wear.compose:compose-navigation:1.3.0")
-
-    // Dynamic Colors (Palette)
-    implementation("androidx.palette:palette-ktx:1.0.0")
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
