@@ -40,10 +40,24 @@ class Ppu(private val nes: Nes) {
     private val bgPixel = IntArray(WIDTH)
     private val bgPalette = IntArray(WIDTH)
 
+    // Sprite scanline buffers — preallocated (max 8 sprites/line) and reused
+    // every scanline to avoid per-line list/object allocation in the hot path.
+    private val spriteIndex = IntArray(8)
+    private val spriteX = IntArray(8)
+    private val spriteAttr = IntArray(8)
+    private val spriteLo = IntArray(8)
+    private val spriteHi = IntArray(8)
+
+    // Resolved palette cache: 32 entries of fully-decoded ARGB colors, rebuilt
+    // only when palette RAM changes. Lets the per-pixel compositor index an
+    // array instead of calling ppuRead() (address decode) for every pixel.
+    private val paletteColor = IntArray(32)
+
     fun reset() {
         ppuCtrl = 0; ppuMask = 0; ppuStatus = 0; oamAddr = 0
         v = 0; t = 0; fineX = 0; writeToggle = false
         scanline = 0; cycle = 0; frameComplete = false; oddFrame = false
+        updatePaletteCache()
     }
 
     // -- Register access from CPU --
@@ -118,7 +132,10 @@ class Ppu(private val nes: Nes) {
         when {
             a < 0x2000 -> nes.mapper.chrWrite(a, value)
             a < 0x3F00 -> nametable[mirrorAddr(a)] = value.toByte()
-            else -> paletteRam[paletteIndex(a)] = (value and 0x3F).toByte()
+            else -> {
+                paletteRam[paletteIndex(a)] = (value and 0x3F).toByte()
+                updatePaletteCache()
+            }
         }
     }
 
@@ -126,6 +143,12 @@ class Ppu(private val nes: Nes) {
         var i = addr and 0x1F
         if (i >= 16 && i and 3 == 0) i -= 16
         return i
+    }
+
+    private fun updatePaletteCache() {
+        for (i in 0 until 32) {
+            paletteColor[i] = Palette.COLORS[paletteRam[paletteIndex(i)].toInt() and 0x3F]
+        }
     }
 
     private fun mirrorAddr(addr: Int): Int {
@@ -183,7 +206,7 @@ class Ppu(private val nes: Nes) {
 
     private fun renderScanline() {
         if (!renderEnabled) {
-            val bgColor = Palette.COLORS[ppuRead(0x3F00) and 0x3F]
+            val bgColor = paletteColor[0]
             val offset = scanline * WIDTH
             for (x in 0 until WIDTH) frameBuffer[offset + x] = bgColor
             return
@@ -246,17 +269,12 @@ class Ppu(private val nes: Nes) {
     private fun renderSpriteScanline() {
         val spriteHeight = if (ppuCtrl and 0x20 != 0) 16 else 8
         val offset = scanline * WIDTH
-        var sprite0Hit = false
 
-        // Collect sprites on this scanline (back to front for priority)
-        data class SpriteEntry(
-            val index: Int, val x: Int, val attr: Int,
-            val lo: Int, val hi: Int
-        )
-        val sprites = mutableListOf<SpriteEntry>()
-
+        // Collect up to 8 sprites on this scanline into the reused buffers,
+        // preserving OAM order so the first match wins on priority.
+        var count = 0
         for (i in 0 until 64) {
-            if (sprites.size >= 8) break
+            if (count >= 8) break
             val y = (oam[i * 4].toInt() and 0xFF) + 1
             val row = scanline - y
             if (row < 0 || row >= spriteHeight) continue
@@ -283,43 +301,44 @@ class Ppu(private val nes: Nes) {
             var hi = ppuRead(patternAddr + 8)
             if (flipH) { lo = reverseBits(lo); hi = reverseBits(hi) }
 
-            sprites.add(SpriteEntry(i, sx, attr, lo, hi))
+            spriteIndex[count] = i
+            spriteX[count] = sx
+            spriteAttr[count] = attr
+            spriteLo[count] = lo
+            spriteHi[count] = hi
+            count++
         }
 
         // Render pixels: first fill with background, then apply sprites
-        val bgColor = ppuRead(0x3F00) and 0x3F
+        val bgColor = paletteColor[0]
         for (x in 0 until WIDTH) {
             val bg = bgPixel[x]
-            var color = if (bg != 0) {
-                ppuRead(0x3F00 + bgPalette[x] * 4 + bg) and 0x3F
-            } else {
-                bgColor
-            }
+            var color = if (bg != 0) paletteColor[bgPalette[x] * 4 + bg] else bgColor
 
             // Find highest-priority opaque sprite at this pixel
             if (showSprites && (showSpritesLeft || x >= 8)) {
-                for (spr in sprites) {
-                    val sx = spr.x
+                for (s in 0 until count) {
+                    val sx = spriteX[s]
                     if (x < sx || x >= sx + 8) continue
                     val bit = 7 - (x - sx)
-                    val pixel = ((spr.lo shr bit) and 1) or (((spr.hi shr bit) and 1) shl 1)
+                    val pixel = ((spriteLo[s] shr bit) and 1) or (((spriteHi[s] shr bit) and 1) shl 1)
                     if (pixel == 0) continue
 
                     // Sprite 0 hit detection
-                    if (spr.index == 0 && bg != 0 && x < 255) {
+                    if (spriteIndex[s] == 0 && bg != 0 && x < 255) {
                         ppuStatus = ppuStatus or 0x40
                     }
 
-                    val behindBg = spr.attr and 0x20 != 0
+                    val behindBg = spriteAttr[s] and 0x20 != 0
                     if (!behindBg || bg == 0) {
-                        val sprPalette = (spr.attr and 3) + 4
-                        color = ppuRead(0x3F00 + sprPalette * 4 + pixel) and 0x3F
+                        val sprPalette = (spriteAttr[s] and 3) + 4
+                        color = paletteColor[sprPalette * 4 + pixel]
                     }
                     break // highest priority sprite wins
                 }
             }
 
-            frameBuffer[offset + x] = Palette.COLORS[color]
+            frameBuffer[offset + x] = color
         }
     }
 
@@ -379,5 +398,6 @@ class Ppu(private val nes: Nes) {
         scanline = inp.readInt(); cycle = inp.readInt()
         frameComplete = inp.readBoolean(); nmiTriggered = inp.readBoolean()
         oddFrame = inp.readBoolean(); dataBuffer = inp.readInt()
+        updatePaletteCache()
     }
 }

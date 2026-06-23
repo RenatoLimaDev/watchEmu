@@ -15,18 +15,28 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.platform.LocalContext
 
+/**
+ * The watch UI is split into independent [Canvas] layers so the expensive,
+ * gradient-heavy bezel/buttons are drawn only once instead of every emulator
+ * frame:
+ *
+ *  - [bitmap] is passed as a [State] and read inside the game layer's *draw*
+ *    lambda (not during composition). A new frame therefore invalidates only
+ *    that layer's draw phase — the static face/front layers never recompose or
+ *    redraw, and the rest of the tree is never recomposed per frame.
+ *  - The analog stick lives in its own layer, redrawn only when the stick moves.
+ */
 @Composable
 fun WatchScreen(
-    bitmap: Bitmap?,
+    bitmap: State<Bitmap?>,
     romLoaded: Boolean,
-    frameCount: Int = 0,
     bezelColor: Color = Color(0xFFD4920A),
     bezelAccent: Color = Color(0xFF6B3A10),
     stickOffsetX: Float = 0f,
     stickOffsetY: Float = 0f
 ) {
     val context = LocalContext.current
-    val pressStart2P = remember {
+    val font = remember {
         try {
             context.resources.getFont(
                 context.resources.getIdentifier("press_start_2p", "font", context.packageName)
@@ -37,44 +47,70 @@ fun WatchScreen(
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
+        // Static background (drawn once, cached as a display list).
         Canvas(modifier = Modifier.fillMaxSize()) {
-            val w = size.width
-            val h = size.height
-            val diameter = minOf(w, h)
-            val ox = (w - diameter) / 2f
-            val oy = (h - diameter) / 2f
-            drawWatch(ox, oy, diameter, bitmap, romLoaded, bezelColor, bezelAccent, stickOffsetX, stickOffsetY, pressStart2P)
+            val g = geometry()
+            drawFaceBackground(g)
+        }
+
+        // Game screen — the only layer that updates per frame. Reading
+        // bitmap.value here defers the state read to the draw phase.
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val g = geometry()
+            drawGameScreen(g, bitmap.value, romLoaded, font)
+        }
+
+        // Static foreground decorations (tray + buttons), drawn once.
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val g = geometry()
+            drawTray(g, bezelColor, bezelAccent)
+            drawCrescentButton(g, isLeft = true, label = "A", bezelColor, bezelAccent, font)
+            drawCrescentButton(g, isLeft = false, label = "B", bezelColor, bezelAccent, font)
+            drawSideButton(g, isLeft = true, label = "SELECT", bezelColor, bezelAccent, font)
+            drawSideButton(g, isLeft = false, label = "START", bezelColor, bezelAccent, font)
+        }
+
+        // Analog stick — redrawn only when the offsets change.
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val g = geometry()
+            drawAnalogStick(g.centerX, g.oy + g.diameter * 0.91f, g.diameter * 0.09f, stickOffsetX, stickOffsetY)
         }
     }
 }
 
-private fun DrawScope.drawWatch(
-    ox: Float, oy: Float, diameter: Float,
-    bitmap: Bitmap?, romLoaded: Boolean,
-    bezelColor: Color, bezelAccent: Color,
-    stickOffsetX: Float, stickOffsetY: Float,
-    font: Typeface
-) {
-    val radius = diameter / 2f
-    val centerX = ox + radius
-    val centerY = oy + radius
+/** Shared layout geometry, derived identically in every full-size layer. */
+private class WatchGeometry(
+    val ox: Float, val oy: Float, val diameter: Float,
+    val radius: Float, val centerX: Float, val centerY: Float
+)
 
-    // Dark watch face background
+private fun DrawScope.geometry(): WatchGeometry {
+    val diameter = minOf(size.width, size.height)
+    val ox = (size.width - diameter) / 2f
+    val oy = (size.height - diameter) / 2f
+    val radius = diameter / 2f
+    return WatchGeometry(ox, oy, diameter, radius, ox + radius, oy + radius)
+}
+
+private fun DrawScope.drawFaceBackground(g: WatchGeometry) {
     drawCircle(
         brush = Brush.radialGradient(
             colors = listOf(Color(0xFF0C0D10), Color(0xFF050506)),
-            center = Offset(centerX, centerY - diameter * 0.12f),
-            radius = radius
+            center = Offset(g.centerX, g.centerY - g.diameter * 0.12f),
+            radius = g.radius
         ),
-        radius = radius,
-        center = Offset(centerX, centerY)
+        radius = g.radius,
+        center = Offset(g.centerX, g.centerY)
     )
+}
 
-    // Game screen area
-    val gameW = diameter * 0.84f
+private fun DrawScope.drawGameScreen(
+    g: WatchGeometry, bitmap: Bitmap?, romLoaded: Boolean, font: Typeface
+) {
+    val gameW = g.diameter * 0.84f
     val gameH = gameW * (240f / 256f)
-    val gameX = ox + (diameter - gameW) / 2f
-    val gameY = oy + (diameter - gameH) / 2f - diameter * 0.01f
+    val gameX = g.ox + (g.diameter - gameW) / 2f
+    val gameY = g.oy + (g.diameter - gameH) / 2f - g.diameter * 0.01f
 
     if (bitmap != null && romLoaded) {
         clipRect(gameX, gameY, gameX + gameW, gameY + gameH) {
@@ -102,40 +138,34 @@ private fun DrawScope.drawWatch(
         }
         val textPaint = android.graphics.Paint().apply {
             color = 0xFF444A54.toInt()
-            textSize = diameter * 0.04f
+            textSize = g.diameter * 0.04f
             textAlign = android.graphics.Paint.Align.CENTER
             typeface = font
         }
-        drawContext.canvas.nativeCanvas.drawText("Loading...", centerX, centerY, textPaint)
+        drawContext.canvas.nativeCanvas.drawText("Loading...", g.centerX, g.centerY, textPaint)
     }
+}
 
-    // Bottom tray (golden crescent at bottom)
-    val trayTop = oy + diameter * 0.82f
-    clipRect(ox, trayTop, ox + diameter, oy + diameter) {
-        drawCircle(bezelColor, radius, Offset(centerX, centerY))
+private fun DrawScope.drawTray(g: WatchGeometry, bezelColor: Color, bezelAccent: Color) {
+    val trayTop = g.oy + g.diameter * 0.82f
+    clipRect(g.ox, trayTop, g.ox + g.diameter, g.oy + g.diameter) {
+        drawCircle(bezelColor, g.radius, Offset(g.centerX, g.centerY))
     }
     drawArc(
         color = bezelAccent,
         startAngle = 35f, sweepAngle = 110f,
         useCenter = false,
-        topLeft = Offset(ox + 2, oy + 2),
-        size = Size(diameter - 4, diameter - 4),
+        topLeft = Offset(g.ox + 2, g.oy + 2),
+        size = Size(g.diameter - 4, g.diameter - 4),
         style = Stroke(2f)
     )
-
-    // Buttons with Press Start 2P font
-    drawCrescentButton(ox, oy, diameter, isLeft = true, label = "A", bezelColor, bezelAccent, font)
-    drawCrescentButton(ox, oy, diameter, isLeft = false, label = "B", bezelColor, bezelAccent, font)
-    drawSideButton(ox, oy, diameter, isLeft = true, label = "SELECT", bezelColor, bezelAccent, font)
-    drawSideButton(ox, oy, diameter, isLeft = false, label = "START", bezelColor, bezelAccent, font)
-
-    drawAnalogStick(centerX, oy + diameter * 0.91f, diameter * 0.09f, stickOffsetX, stickOffsetY)
 }
 
 private fun DrawScope.drawCrescentButton(
-    ox: Float, oy: Float, diameter: Float, isLeft: Boolean, label: String,
+    g: WatchGeometry, isLeft: Boolean, label: String,
     bezelColor: Color, bezelAccent: Color, font: Typeface
 ) {
+    val ox = g.ox; val oy = g.oy; val diameter = g.diameter
     val btnW = diameter * 0.40f
     val btnH = diameter * 0.125f
     val btnX = if (isLeft) ox + diameter * 0.10f else ox + diameter * 0.50f
@@ -180,9 +210,10 @@ private fun DrawScope.drawCrescentButton(
 }
 
 private fun DrawScope.drawSideButton(
-    ox: Float, oy: Float, diameter: Float, isLeft: Boolean, label: String,
+    g: WatchGeometry, isLeft: Boolean, label: String,
     bezelColor: Color, bezelAccent: Color, font: Typeface
 ) {
+    val ox = g.ox; val oy = g.oy; val diameter = g.diameter
     val btnW = diameter * 0.105f
     val btnH = diameter * 0.80f
     val btnX = if (isLeft) ox else ox + diameter - btnW

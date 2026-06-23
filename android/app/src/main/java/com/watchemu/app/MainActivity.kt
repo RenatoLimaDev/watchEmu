@@ -20,7 +20,6 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.tween
 import androidx.compose.runtime.*
-import androidx.compose.runtime.mutableIntStateOf
 import com.watchemu.app.nes.Controller
 import com.watchemu.app.nes.Nes
 import com.watchemu.app.nes.Ppu
@@ -38,10 +37,23 @@ import kotlin.math.*
 class MainActivity : ComponentActivity() {
 
     private val nes = Nes()
-    private var gameBitmap = Bitmap.createBitmap(Ppu.WIDTH, Ppu.HEIGHT, Bitmap.Config.ARGB_8888)
+
+    // Double-buffered output. The audio thread (which drives emulation) copies
+    // the finished frame into [pendingPixels] under [pixelLock]; the main thread
+    // then uploads it into whichever bitmap is NOT currently being shown. Handing
+    // Compose a different instance each frame means the GPU never reads a bitmap
+    // while it is being mutated (no tearing / data race).
+    private val gameBitmaps = arrayOf(
+        Bitmap.createBitmap(Ppu.WIDTH, Ppu.HEIGHT, Bitmap.Config.ARGB_8888),
+        Bitmap.createBitmap(Ppu.WIDTH, Ppu.HEIGHT, Bitmap.Config.ARGB_8888)
+    )
+    private var gameBitmapIdx = 0
+    private val pixelLock = Any()
+    private val pendingPixels = IntArray(Ppu.WIDTH * Ppu.HEIGHT)
+    private var pendingFrame = false
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var bitmapState = mutableStateOf<Bitmap?>(null)
     private var romLoadedState = mutableStateOf(false)
-    private var frameCounter = mutableIntStateOf(0)
 
     private var currentScreen = mutableStateOf("picker")
     private var romFiles = mutableStateOf<List<File>>(emptyList())
@@ -83,9 +95,7 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val screen by currentScreen
-            val bitmap by bitmapState
             val loaded by romLoadedState
-            val frame by frameCounter
             val roms by romFiles
             val stickX by analogX
             val stickY by analogY
@@ -127,9 +137,8 @@ class MainActivity : ComponentActivity() {
                                 currentScreen.value = "picker"
                             }
                             WatchScreen(
-                                bitmap = bitmap,
+                                bitmap = bitmapState,
                                 romLoaded = loaded,
-                                frameCount = frame,
                                 stickOffsetX = stickX,
                                 stickOffsetY = stickY
                             )
@@ -388,14 +397,23 @@ class MainActivity : ComponentActivity() {
         // producing frames as a side effect of generating audio samples.
         // This ensures audio is never starved and game speed is correct.
         nes.apu.startWithEmulation(nes) {
-            // Called from audio thread when a video frame completes
-            gameBitmap.setPixels(
-                nes.frameBuffer, 0, Ppu.WIDTH,
-                0, 0, Ppu.WIDTH, Ppu.HEIGHT
-            )
-            android.os.Handler(android.os.Looper.getMainLooper()).post {
-                bitmapState.value = gameBitmap
-                frameCounter.intValue++
+            // Called from the audio thread when a video frame completes. Snapshot
+            // the frame buffer under the lock so the main thread can upload it
+            // without racing the next frame the emulator is about to produce.
+            synchronized(pixelLock) {
+                System.arraycopy(nes.frameBuffer, 0, pendingPixels, 0, pendingPixels.size)
+                pendingFrame = true
+            }
+            mainHandler.post {
+                val bmp = synchronized(pixelLock) {
+                    if (!pendingFrame) return@post
+                    pendingFrame = false
+                    gameBitmapIdx = gameBitmapIdx xor 1
+                    val target = gameBitmaps[gameBitmapIdx]
+                    target.setPixels(pendingPixels, 0, Ppu.WIDTH, 0, 0, Ppu.WIDTH, Ppu.HEIGHT)
+                    target
+                }
+                bitmapState.value = bmp
             }
         }
     }
