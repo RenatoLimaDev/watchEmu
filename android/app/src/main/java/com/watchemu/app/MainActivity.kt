@@ -22,7 +22,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.runtime.*
 import com.watchemu.app.nes.Controller
 import com.watchemu.app.nes.Nes
-import com.watchemu.app.nes.Ppu
 import com.watchemu.app.ui.RomPickerScreen
 import com.watchemu.app.ui.WatchScreen
 import com.watchemu.app.ui.theme.WatchEmuTheme
@@ -44,12 +43,12 @@ class MainActivity : ComponentActivity() {
     // Compose a different instance each frame means the GPU never reads a bitmap
     // while it is being mutated (no tearing / data race).
     private val gameBitmaps = arrayOf(
-        Bitmap.createBitmap(Ppu.WIDTH, Ppu.HEIGHT, Bitmap.Config.ARGB_8888),
-        Bitmap.createBitmap(Ppu.WIDTH, Ppu.HEIGHT, Bitmap.Config.ARGB_8888)
+        Bitmap.createBitmap(Nes.WIDTH, Nes.HEIGHT, Bitmap.Config.ARGB_8888),
+        Bitmap.createBitmap(Nes.WIDTH, Nes.HEIGHT, Bitmap.Config.ARGB_8888)
     )
     private var gameBitmapIdx = 0
     private val pixelLock = Any()
-    private val pendingPixels = IntArray(Ppu.WIDTH * Ppu.HEIGHT)
+    private val pendingPixels = IntArray(Nes.WIDTH * Nes.HEIGHT)
     private var pendingFrame = false
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private var bitmapState = mutableStateOf<Bitmap?>(null)
@@ -410,7 +409,7 @@ class MainActivity : ComponentActivity() {
                     pendingFrame = false
                     gameBitmapIdx = gameBitmapIdx xor 1
                     val target = gameBitmaps[gameBitmapIdx]
-                    target.setPixels(pendingPixels, 0, Ppu.WIDTH, 0, 0, Ppu.WIDTH, Ppu.HEIGHT)
+                    target.setPixels(pendingPixels, 0, Nes.WIDTH, 0, 0, Nes.WIDTH, Nes.HEIGHT)
                     target
                 }
                 bitmapState.value = bmp
