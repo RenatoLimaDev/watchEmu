@@ -45,16 +45,18 @@ Java_com_watchemu_app_nes_NativeBridge_isRomLoaded(JNIEnv*, jclass) {
     return g_nes.romLoaded ? JNI_TRUE : JNI_FALSE;
 }
 
-// Runs the emulation to produce `count` audio samples into `out`. Video frames
-// completed during the call are snapshotted into g_present; returns how many.
+// Runs the emulation to produce `count` 16-bit PCM samples into `out` (so the
+// Kotlin side can use the legacy AudioTrack path that works back to Android 4.4).
+// Video frames completed during the call are snapshotted into g_present;
+// returns how many.
 JNIEXPORT jint JNICALL
-Java_com_watchemu_app_nes_NativeBridge_renderAudio(JNIEnv* env, jclass, jfloatArray outArr, jint count) {
+Java_com_watchemu_app_nes_NativeBridge_renderAudio(JNIEnv* env, jclass, jshortArray outArr, jint count) {
     std::lock_guard<std::mutex> lock(g_mutex);
-    jfloat* out = env->GetFloatArrayElements(outArr, nullptr);
+    jshort* out = env->GetShortArrayElements(outArr, nullptr);
 
     if (!g_nes.romLoaded) {
-        for (int i = 0; i < count; i++) out[i] = 0.0f;
-        env->ReleaseFloatArrayElements(outArr, out, 0);
+        for (int i = 0; i < count; i++) out[i] = 0;
+        env->ReleaseShortArrayElements(outArr, out, 0);
         return 0;
     }
 
@@ -71,10 +73,14 @@ Java_com_watchemu_app_nes_NativeBridge_renderAudio(JNIEnv* env, jclass, jfloatAr
             }
         }
         g_cycleAccum -= CYCLES_PER_SAMPLE;
-        out[i] = g_nes.apu.mixOneSample();
+        // mixOneSample() returns [-1, 1]; convert to signed 16-bit PCM.
+        int v = (int)(g_nes.apu.mixOneSample() * 32767.0f);
+        if (v > 32767) v = 32767;
+        if (v < -32768) v = -32768;
+        out[i] = (jshort)v;
     }
 
-    env->ReleaseFloatArrayElements(outArr, out, 0);
+    env->ReleaseShortArrayElements(outArr, out, 0);
     return frames;
 }
 

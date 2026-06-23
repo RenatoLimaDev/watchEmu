@@ -14,8 +14,8 @@ object NativeBridge {
     external fun setButton(button: Int, pressed: Boolean)
     external fun isRomLoaded(): Boolean
 
-    /** Generate [count] audio samples into [out]; returns video frames completed. */
-    external fun renderAudio(out: FloatArray, count: Int): Int
+    /** Generate [count] 16-bit PCM samples into [out]; returns video frames completed. */
+    external fun renderAudio(out: ShortArray, count: Int): Int
 
     /** Copy the most recently completed frame (ARGB_8888) into [dst]. */
     external fun getFrameBuffer(dst: IntArray)
