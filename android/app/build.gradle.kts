@@ -6,6 +6,7 @@ plugins {
 android {
     namespace = "com.watchemu.app"
     compileSdk = 34
+    ndkVersion = "26.3.11579264"
 
     defaultConfig {
         applicationId = "com.watchemu.app"
