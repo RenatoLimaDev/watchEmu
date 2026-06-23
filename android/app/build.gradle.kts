@@ -11,8 +11,9 @@ android {
     defaultConfig {
         applicationId = "com.watchemu.app"
         // Classic Views UI (no Compose/AndroidX) so the app installs and runs on
-        // old standalone Android watches (Android 4.4+).
-        minSdk = 19
+        // old standalone Android watches. minSdk 21 (Android 5.0) is the floor:
+        // the NDK (r26) cannot build native code for API 19.
+        minSdk = 21
         targetSdk = 34
         versionCode = 2
         versionName = "2.0"
